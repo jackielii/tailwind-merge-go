@@ -3,7 +3,7 @@ package lru
 import (
 	"sync"
 
-	"github.com/Oudwins/tailwind-merge-go/pkg/cache"
+	"github.com/jackielii/tailwind-merge-go/pkg/cache"
 )
 
 type node struct {

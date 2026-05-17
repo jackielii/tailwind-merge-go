@@ -2,87 +2,102 @@ package twmerge
 
 import (
 	"regexp"
-	"slices"
 	"strings"
 )
 
-const SPLIT_CLASSES_REGEX = `\s+`
+var splitClassesRegex = regexp.MustCompile(`\s+`)
 
-var splitPattern = regexp.MustCompile(SPLIT_CLASSES_REGEX)
+type mergeClassListFn func(classList string) string
 
-func MakeMergeClassList(conf *TwMergeConfig, splitModifiers SplitModifiersFn, getClassGroupId GetClassGroupIdfn) func(classList string) string {
+func createMergeClassList(utils *configUtils) mergeClassListFn {
 	return func(classList string) string {
-		classes := splitPattern.Split(strings.TrimSpace(classList), -1)
-		unqClasses := make(map[string]string, len(classes))
-		resultClassList := ""
+		trimmed := strings.TrimSpace(classList)
+		if trimmed == "" {
+			return ""
+		}
+		classNames := splitClassesRegex.Split(trimmed, -1)
+		// classGroupsInConflict acts as a set; preserves insertion order.
+		conflictSet := make(map[string]struct{}, len(classNames))
+		// resultParts collected from the right so the original order is restored at the end.
+		var resultParts []string
 
-		for _, class := range classes {
-			baseClass, modifiers, hasImportant, maybePostfixModPosition := splitModifiers(class)
+		for i := len(classNames) - 1; i >= 0; i-- {
+			originalClassName := classNames[i]
+			parsed := utils.parseClassName(originalClassName)
 
-			// there is a postfix modifier -> text-lg/8
-			if maybePostfixModPosition != -1 {
-				baseClass = baseClass[:maybePostfixModPosition]
-			}
-			isTwClass, groupId := getClassGroupId(baseClass)
-			if !isTwClass {
-				resultClassList += class + " "
+			if parsed.IsExternal {
+				resultParts = append(resultParts, originalClassName)
 				continue
 			}
-			// we have to sort the modifiers bc hover:focus:bg-red-500 == focus:hover:bg-red-500
-			modifiers = SortModifiers(modifiers)
-			if hasImportant {
-				modifiers = append(modifiers, "!")
-			}
-			unqClasses[groupId+strings.Join(modifiers, string(conf.ModifierSeparator))] = class
 
-			conflicts := conf.ConflictingClassGroups[groupId]
-			if conflicts == nil {
+			hasPostfixModifier := parsed.MaybePostfixModifierPosition != -1
+			var classGroupID string
+			var found bool
+
+			if hasPostfixModifier {
+				baseWithoutPostfix := parsed.BaseClassName[:parsed.MaybePostfixModifierPosition]
+				classGroupID, found = utils.getClassGroupID(baseWithoutPostfix)
+
+				if found && utils.postfixLookupClassGroupIDs[classGroupID] {
+					if newID, ok := utils.getClassGroupID(parsed.BaseClassName); ok && newID != classGroupID {
+						classGroupID = newID
+						hasPostfixModifier = false
+					}
+				}
+			} else {
+				classGroupID, found = utils.getClassGroupID(parsed.BaseClassName)
+			}
+
+			if !found {
+				if !hasPostfixModifier {
+					resultParts = append(resultParts, originalClassName)
+					continue
+				}
+				classGroupID, found = utils.getClassGroupID(parsed.BaseClassName)
+				if !found {
+					resultParts = append(resultParts, originalClassName)
+					continue
+				}
+				hasPostfixModifier = false
+			}
+
+			// Build modifier prefix.
+			var variantModifier string
+			switch len(parsed.Modifiers) {
+			case 0:
+				variantModifier = ""
+			case 1:
+				variantModifier = parsed.Modifiers[0]
+			default:
+				variantModifier = strings.Join(utils.sortModifiers(parsed.Modifiers), ":")
+			}
+
+			modifierID := variantModifier
+			if parsed.HasImportantModifier {
+				modifierID += importantModifier
+			}
+
+			classID := modifierID + classGroupID
+			if _, exists := conflictSet[classID]; exists {
 				continue
 			}
-			for _, conflict := range conflicts {
-				// erase the conflicts with the same modifiers
-				unqClasses[conflict+strings.Join(modifiers, string(conf.ModifierSeparator))] = ""
+			conflictSet[classID] = struct{}{}
+
+			for _, group := range utils.getConflictingClassGroupIDs(classGroupID, hasPostfixModifier) {
+				conflictSet[modifierID+group] = struct{}{}
 			}
+
+			resultParts = append(resultParts, originalClassName)
 		}
 
-		for _, class := range unqClasses {
-			if class == "" {
-				continue
+		// resultParts is in reverse insertion order; reverse to restore original-left-to-right.
+		var b strings.Builder
+		for i := len(resultParts) - 1; i >= 0; i-- {
+			if b.Len() > 0 {
+				b.WriteByte(' ')
 			}
-			resultClassList += class + " "
+			b.WriteString(resultParts[i])
 		}
-		return strings.TrimSpace(resultClassList)
+		return b.String()
 	}
-
-}
-
-/**
- * Sorts modifiers according to following schema:
- * - Predefined modifiers are sorted alphabetically
- * - When an arbitrary variant appears, it must be preserved which modifiers are before and after it
- */
-func SortModifiers(modifiers []string) []string {
-	if modifiers == nil || len(modifiers) < 2 {
-		return modifiers
-	}
-
-	unsortedModifiers := []string{}
-	sorted := make([]string, len(modifiers))
-
-	for _, modifier := range modifiers {
-		isArbitraryVariant := modifier[0] == '['
-		if isArbitraryVariant {
-			slices.Sort(unsortedModifiers)
-			sorted = append(sorted, unsortedModifiers...)
-			sorted = append(sorted, modifier)
-			unsortedModifiers = []string{}
-			continue
-		}
-		unsortedModifiers = append(unsortedModifiers, modifier)
-	}
-
-	slices.Sort(unsortedModifiers)
-	sorted = append(sorted, unsortedModifiers...)
-
-	return sorted
 }

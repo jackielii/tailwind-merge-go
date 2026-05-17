@@ -1,5022 +1,2016 @@
 package twmerge
 
-func getBreaks(groupId string) map[string]ClassPart {
-	return map[string]ClassPart{
-		"auto": ClassPart{
-			NextPart:     map[string]ClassPart{},
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-		"avoid": ClassPart{
-			NextPart:     make(map[string]ClassPart),
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-		"all": ClassPart{
-			NextPart:     map[string]ClassPart{},
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-		"page": ClassPart{
-			NextPart:     map[string]ClassPart{},
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-		"left": ClassPart{
-			NextPart:     map[string]ClassPart{},
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-		"right": ClassPart{
-			NextPart:     map[string]ClassPart{},
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-		"column": ClassPart{
-			NextPart:     map[string]ClassPart{},
-			Validators:   []ClassGroupValidator{},
-			ClassGroupId: groupId,
-		},
-	}
-}
+// GetDefaultConfig returns a fresh copy of the default tailwind-merge configuration.
+// Each call returns new maps/slices so mutation by callers doesn't leak.
+func GetDefaultConfig() *Config {
+	// Theme getters for theme variable namespaces.
+	// @see https://tailwindcss.com/docs/theme#theme-variable-namespaces
+	themeColor := FromTheme("color")
+	themeFont := FromTheme("font")
+	themeText := FromTheme("text")
+	themeFontWeight := FromTheme("font-weight")
+	themeTracking := FromTheme("tracking")
+	themeLeading := FromTheme("leading")
+	themeBreakpoint := FromTheme("breakpoint")
+	themeContainer := FromTheme("container")
+	themeSpacing := FromTheme("spacing")
+	themeRadius := FromTheme("radius")
+	themeShadow := FromTheme("shadow")
+	themeInsetShadow := FromTheme("inset-shadow")
+	themeTextShadow := FromTheme("text-shadow")
+	themeDropShadow := FromTheme("drop-shadow")
+	themeBlur := FromTheme("blur")
+	themePerspective := FromTheme("perspective")
+	themeAspect := FromTheme("aspect")
+	themeEase := FromTheme("ease")
+	themeAnimate := FromTheme("animate")
 
-// This is horrible code. I'm sorry. I wanted to get the package working without writing the code to generate the config. Now that it is working I plan to writing it.
-func MakeDefaultConfig() *TwMergeConfig {
-	return &TwMergeConfig{
-		ModifierSeparator: ':',
-		ClassSeparator:    '-',
-		ImportantModifier: '!',
-		PostfixModifier:   '/',
-		MaxCacheSize:      1000,
-		// Prefix:            "",
-		// theme:             TwTheme{},
-		ConflictingClassGroups: ConflictingClassGroups{
-			"overflow":         {"overflow-x", "overflow-y"},
-			"overscroll":       {"overscroll-x", "overscroll-y"},
-			"inset":            {"inset-x", "inset-y", "start", "end", "top", "right", "bottom", "left"},
-			"inset-x":          {"right", "left"},
-			"inset-y":          {"top", "bottom"},
-			"flex":             {"basis", "grow", "shrink"},
-			"gap":              {"gap-x", "gap-y"},
-			"p":                {"px", "py", "ps", "pe", "pt", "pr", "pb", "pl"},
-			"px":               {"pr", "pl"},
-			"py":               {"pt", "pb"},
-			"m":                {"mx", "my", "ms", "me", "mt", "mr", "mb", "ml"},
-			"mx":               {"mr", "ml"},
-			"my":               {"mt", "mb"},
-			"size":             {"w", "h"},
-			"font-size":        {"leading"},
-			"fvn-normal":       {"fvn-ordinal", "fvn-slashed-zero", "fvn-figure", "fvn-spacing", "fvn-fraction"},
+	// concat builds a new ClassGroup by appending all provided groups in order.
+	// This mirrors TS spread syntax (e.g. [...scaleX(), 'foo']).
+	concat := func(groups ...ClassGroup) ClassGroup {
+		var out ClassGroup
+		for _, g := range groups {
+			out = append(out, g...)
+		}
+		return out
+	}
+
+	// Helpers to avoid repeating the same scales.
+	// Each helper returns a freshly allocated slice so mutation by callers
+	// doesn't leak to other groups.
+	scaleBreak := func() ClassGroup {
+		return ClassGroup{"auto", "avoid", "all", "avoid-page", "page", "left", "right", "column"}
+	}
+	scalePosition := func() ClassGroup {
+		return ClassGroup{
+			"center",
+			"top",
+			"bottom",
+			"left",
+			"right",
+			"top-left",
+			// Deprecated since Tailwind CSS v4.1.0, see https://github.com/tailwindlabs/tailwindcss/pull/17378
+			"left-top",
+			"top-right",
+			// Deprecated since Tailwind CSS v4.1.0, see https://github.com/tailwindlabs/tailwindcss/pull/17378
+			"right-top",
+			"bottom-right",
+			// Deprecated since Tailwind CSS v4.1.0, see https://github.com/tailwindlabs/tailwindcss/pull/17378
+			"right-bottom",
+			"bottom-left",
+			// Deprecated since Tailwind CSS v4.1.0, see https://github.com/tailwindlabs/tailwindcss/pull/17378
+			"left-bottom",
+		}
+	}
+	scalePositionWithArbitrary := func() ClassGroup {
+		return concat(scalePosition(), ClassGroup{IsArbitraryVariable, IsArbitraryValue})
+	}
+	scaleOverflow := func() ClassGroup {
+		return ClassGroup{"auto", "hidden", "clip", "visible", "scroll"}
+	}
+	scaleOverscroll := func() ClassGroup {
+		return ClassGroup{"auto", "contain", "none"}
+	}
+	scaleUnambiguousSpacing := func() ClassGroup {
+		return ClassGroup{IsArbitraryVariable, IsArbitraryValue, themeSpacing}
+	}
+	scaleInset := func() ClassGroup {
+		return concat(ClassGroup{IsFraction, "full", "auto"}, scaleUnambiguousSpacing())
+	}
+	scaleGridTemplateColsRows := func() ClassGroup {
+		return ClassGroup{IsInteger, "none", "subgrid", IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleGridColRowStartAndEnd := func() ClassGroup {
+		return ClassGroup{
+			"auto",
+			ClassObject{"span": ClassGroup{"full", IsInteger, IsArbitraryVariable, IsArbitraryValue}},
+			IsInteger,
+			IsArbitraryVariable,
+			IsArbitraryValue,
+		}
+	}
+	scaleGridColRowStartOrEnd := func() ClassGroup {
+		return ClassGroup{IsInteger, "auto", IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleGridAutoColsRows := func() ClassGroup {
+		return ClassGroup{"auto", "min", "max", "fr", IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleAlignPrimaryAxis := func() ClassGroup {
+		return ClassGroup{
+			"start",
+			"end",
+			"center",
+			"between",
+			"around",
+			"evenly",
+			"stretch",
+			"baseline",
+			"center-safe",
+			"end-safe",
+		}
+	}
+	scaleAlignSecondaryAxis := func() ClassGroup {
+		return ClassGroup{"start", "end", "center", "stretch", "center-safe", "end-safe"}
+	}
+	scaleMargin := func() ClassGroup {
+		return concat(ClassGroup{"auto"}, scaleUnambiguousSpacing())
+	}
+	scaleSizing := func() ClassGroup {
+		return concat(ClassGroup{
+			IsFraction,
+			"auto",
+			"full",
+			"dvw",
+			"dvh",
+			"lvw",
+			"lvh",
+			"svw",
+			"svh",
+			"min",
+			"max",
+			"fit",
+		}, scaleUnambiguousSpacing())
+	}
+	scaleSizingInline := func() ClassGroup {
+		return concat(ClassGroup{
+			IsFraction,
+			"screen",
+			"full",
+			"dvw",
+			"lvw",
+			"svw",
+			"min",
+			"max",
+			"fit",
+		}, scaleUnambiguousSpacing())
+	}
+	scaleSizingBlock := func() ClassGroup {
+		return concat(ClassGroup{
+			IsFraction,
+			"screen",
+			"full",
+			"lh",
+			"dvh",
+			"lvh",
+			"svh",
+			"min",
+			"max",
+			"fit",
+		}, scaleUnambiguousSpacing())
+	}
+	scaleColor := func() ClassGroup {
+		return ClassGroup{themeColor, IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleBgPosition := func() ClassGroup {
+		return concat(scalePosition(), ClassGroup{
+			IsArbitraryVariablePosition,
+			IsArbitraryPosition,
+			ClassObject{"position": ClassGroup{IsArbitraryVariable, IsArbitraryValue}},
+		})
+	}
+	scaleBgRepeat := func() ClassGroup {
+		return ClassGroup{
+			"no-repeat",
+			ClassObject{"repeat": ClassGroup{"", "x", "y", "space", "round"}},
+		}
+	}
+	scaleBgSize := func() ClassGroup {
+		return ClassGroup{
+			"auto",
+			"cover",
+			"contain",
+			IsArbitraryVariableSize,
+			IsArbitrarySize,
+			ClassObject{"size": ClassGroup{IsArbitraryVariable, IsArbitraryValue}},
+		}
+	}
+	scaleGradientStopPosition := func() ClassGroup {
+		return ClassGroup{IsPercent, IsArbitraryVariableLength, IsArbitraryLength}
+	}
+	scaleRadius := func() ClassGroup {
+		return ClassGroup{
+			// Deprecated since Tailwind CSS v4.0.0
+			"",
+			"none",
+			"full",
+			themeRadius,
+			IsArbitraryVariable,
+			IsArbitraryValue,
+		}
+	}
+	scaleBorderWidth := func() ClassGroup {
+		return ClassGroup{"", IsNumber, IsArbitraryVariableLength, IsArbitraryLength}
+	}
+	scaleLineStyle := func() ClassGroup {
+		return ClassGroup{"solid", "dashed", "dotted", "double"}
+	}
+	scaleBlendMode := func() ClassGroup {
+		return ClassGroup{
+			"normal",
+			"multiply",
+			"screen",
+			"overlay",
+			"darken",
+			"lighten",
+			"color-dodge",
+			"color-burn",
+			"hard-light",
+			"soft-light",
+			"difference",
+			"exclusion",
+			"hue",
+			"saturation",
+			"color",
+			"luminosity",
+		}
+	}
+	scaleMaskImagePosition := func() ClassGroup {
+		return ClassGroup{IsNumber, IsPercent, IsArbitraryVariablePosition, IsArbitraryPosition}
+	}
+	scaleBlur := func() ClassGroup {
+		return ClassGroup{
+			// Deprecated since Tailwind CSS v4.0.0
+			"",
+			"none",
+			themeBlur,
+			IsArbitraryVariable,
+			IsArbitraryValue,
+		}
+	}
+	scaleRotate := func() ClassGroup {
+		return ClassGroup{"none", IsNumber, IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleScale := func() ClassGroup {
+		return ClassGroup{"none", IsNumber, IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleSkew := func() ClassGroup {
+		return ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}
+	}
+	scaleTranslate := func() ClassGroup {
+		return concat(ClassGroup{IsFraction, "full"}, scaleUnambiguousSpacing())
+	}
+
+	return &Config{
+		CacheSize: 500,
+		Theme: Theme{
+			"animate":      ClassGroup{"spin", "ping", "pulse", "bounce"},
+			"aspect":       ClassGroup{"video"},
+			"blur":         ClassGroup{IsTshirtSize},
+			"breakpoint":   ClassGroup{IsTshirtSize},
+			"color":        ClassGroup{IsAny},
+			"container":    ClassGroup{IsTshirtSize},
+			"drop-shadow": ClassGroup{IsTshirtSize},
+			"ease":         ClassGroup{"in", "out", "in-out"},
+			"font":         ClassGroup{IsAnyNonArbitrary},
+			"font-weight": ClassGroup{
+				"thin",
+				"extralight",
+				"light",
+				"normal",
+				"medium",
+				"semibold",
+				"bold",
+				"extrabold",
+				"black",
+			},
+			"inset-shadow": ClassGroup{IsTshirtSize},
+			"leading":      ClassGroup{"none", "tight", "snug", "normal", "relaxed", "loose"},
+			"perspective":  ClassGroup{"dramatic", "near", "normal", "midrange", "distant", "none"},
+			"radius":       ClassGroup{IsTshirtSize},
+			"shadow":       ClassGroup{IsTshirtSize},
+			"spacing":      ClassGroup{"px", IsNumber},
+			"text":         ClassGroup{IsTshirtSize},
+			"text-shadow":  ClassGroup{IsTshirtSize},
+			"tracking":     ClassGroup{"tighter", "tight", "normal", "wide", "wider", "widest"},
+		},
+		ClassGroups: ClassGroupsMap{
+			// --------------
+			// --- Layout ---
+			// --------------
+
+			// Aspect Ratio
+			// @see https://tailwindcss.com/docs/aspect-ratio
+			"aspect": ClassGroup{
+				ClassObject{
+					"aspect": ClassGroup{
+						"auto",
+						"square",
+						IsFraction,
+						IsArbitraryValue,
+						IsArbitraryVariable,
+						themeAspect,
+					},
+				},
+			},
+			// Container
+			// @see https://tailwindcss.com/docs/container
+			// @deprecated since Tailwind CSS v4.0.0
+			"container": ClassGroup{"container"},
+			// Container Type
+			// @see https://tailwindcss.com/docs/responsive-design#container-queries
+			"container-type": ClassGroup{
+				ClassObject{"@container": ClassGroup{"", "normal", "size", IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Container Name
+			// @see https://tailwindcss.com/docs/responsive-design#named-containers
+			"container-named": ClassGroup{IsNamedContainerQuery},
+			// Columns
+			// @see https://tailwindcss.com/docs/columns
+			"columns": ClassGroup{
+				ClassObject{"columns": ClassGroup{IsNumber, IsArbitraryValue, IsArbitraryVariable, themeContainer}},
+			},
+			// Break After
+			// @see https://tailwindcss.com/docs/break-after
+			"break-after": ClassGroup{ClassObject{"break-after": scaleBreak()}},
+			// Break Before
+			// @see https://tailwindcss.com/docs/break-before
+			"break-before": ClassGroup{ClassObject{"break-before": scaleBreak()}},
+			// Break Inside
+			// @see https://tailwindcss.com/docs/break-inside
+			"break-inside": ClassGroup{
+				ClassObject{"break-inside": ClassGroup{"auto", "avoid", "avoid-page", "avoid-column"}},
+			},
+			// Box Decoration Break
+			// @see https://tailwindcss.com/docs/box-decoration-break
+			"box-decoration": ClassGroup{ClassObject{"box-decoration": ClassGroup{"slice", "clone"}}},
+			// Box Sizing
+			// @see https://tailwindcss.com/docs/box-sizing
+			"box": ClassGroup{ClassObject{"box": ClassGroup{"border", "content"}}},
+			// Display
+			// @see https://tailwindcss.com/docs/display
+			"display": ClassGroup{
+				"block",
+				"inline-block",
+				"inline",
+				"flex",
+				"inline-flex",
+				"table",
+				"inline-table",
+				"table-caption",
+				"table-cell",
+				"table-column",
+				"table-column-group",
+				"table-footer-group",
+				"table-header-group",
+				"table-row-group",
+				"table-row",
+				"flow-root",
+				"grid",
+				"inline-grid",
+				"contents",
+				"list-item",
+				"hidden",
+			},
+			// Screen Reader Only
+			// @see https://tailwindcss.com/docs/display#screen-reader-only
+			"sr": ClassGroup{"sr-only", "not-sr-only"},
+			// Floats
+			// @see https://tailwindcss.com/docs/float
+			"float": ClassGroup{ClassObject{"float": ClassGroup{"right", "left", "none", "start", "end"}}},
+			// Clear
+			// @see https://tailwindcss.com/docs/clear
+			"clear": ClassGroup{ClassObject{"clear": ClassGroup{"left", "right", "both", "none", "start", "end"}}},
+			// Isolation
+			// @see https://tailwindcss.com/docs/isolation
+			"isolation": ClassGroup{"isolate", "isolation-auto"},
+			// Object Fit
+			// @see https://tailwindcss.com/docs/object-fit
+			"object-fit": ClassGroup{ClassObject{"object": ClassGroup{"contain", "cover", "fill", "none", "scale-down"}}},
+			// Object Position
+			// @see https://tailwindcss.com/docs/object-position
+			"object-position": ClassGroup{ClassObject{"object": scalePositionWithArbitrary()}},
+			// Overflow
+			// @see https://tailwindcss.com/docs/overflow
+			"overflow": ClassGroup{ClassObject{"overflow": scaleOverflow()}},
+			// Overflow X
+			// @see https://tailwindcss.com/docs/overflow
+			"overflow-x": ClassGroup{ClassObject{"overflow-x": scaleOverflow()}},
+			// Overflow Y
+			// @see https://tailwindcss.com/docs/overflow
+			"overflow-y": ClassGroup{ClassObject{"overflow-y": scaleOverflow()}},
+			// Overscroll Behavior
+			// @see https://tailwindcss.com/docs/overscroll-behavior
+			"overscroll": ClassGroup{ClassObject{"overscroll": scaleOverscroll()}},
+			// Overscroll Behavior X
+			// @see https://tailwindcss.com/docs/overscroll-behavior
+			"overscroll-x": ClassGroup{ClassObject{"overscroll-x": scaleOverscroll()}},
+			// Overscroll Behavior Y
+			// @see https://tailwindcss.com/docs/overscroll-behavior
+			"overscroll-y": ClassGroup{ClassObject{"overscroll-y": scaleOverscroll()}},
+			// Position
+			// @see https://tailwindcss.com/docs/position
+			"position": ClassGroup{"static", "fixed", "absolute", "relative", "sticky"},
+			// Inset
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"inset": ClassGroup{ClassObject{"inset": scaleInset()}},
+			// Inset Inline
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"inset-x": ClassGroup{ClassObject{"inset-x": scaleInset()}},
+			// Inset Block
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"inset-y": ClassGroup{ClassObject{"inset-y": scaleInset()}},
+			// Inset Inline Start
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			// @todo class group will be renamed to `inset-s` in next major release
+			"start": ClassGroup{
+				ClassObject{
+					"inset-s": scaleInset(),
+					// @deprecated since Tailwind CSS v4.2.0 in favor of `inset-s-*` utilities.
+					// @see https://github.com/tailwindlabs/tailwindcss/pull/19613
+					"start": scaleInset(),
+				},
+			},
+			// Inset Inline End
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			// @todo class group will be renamed to `inset-e` in next major release
+			"end": ClassGroup{
+				ClassObject{
+					"inset-e": scaleInset(),
+					// @deprecated since Tailwind CSS v4.2.0 in favor of `inset-e-*` utilities.
+					// @see https://github.com/tailwindlabs/tailwindcss/pull/19613
+					"end": scaleInset(),
+				},
+			},
+			// Inset Block Start
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"inset-bs": ClassGroup{ClassObject{"inset-bs": scaleInset()}},
+			// Inset Block End
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"inset-be": ClassGroup{ClassObject{"inset-be": scaleInset()}},
+			// Top
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"top": ClassGroup{ClassObject{"top": scaleInset()}},
+			// Right
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"right": ClassGroup{ClassObject{"right": scaleInset()}},
+			// Bottom
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"bottom": ClassGroup{ClassObject{"bottom": scaleInset()}},
+			// Left
+			// @see https://tailwindcss.com/docs/top-right-bottom-left
+			"left": ClassGroup{ClassObject{"left": scaleInset()}},
+			// Visibility
+			// @see https://tailwindcss.com/docs/visibility
+			"visibility": ClassGroup{"visible", "invisible", "collapse"},
+			// Z-Index
+			// @see https://tailwindcss.com/docs/z-index
+			"z": ClassGroup{ClassObject{"z": ClassGroup{IsInteger, "auto", IsArbitraryVariable, IsArbitraryValue}}},
+
+			// ------------------------
+			// --- Flexbox and Grid ---
+			// ------------------------
+
+			// Flex Basis
+			// @see https://tailwindcss.com/docs/flex-basis
+			"basis": ClassGroup{
+				ClassObject{
+					"basis": concat(ClassGroup{IsFraction, "full", "auto", themeContainer}, scaleUnambiguousSpacing()),
+				},
+			},
+			// Flex Direction
+			// @see https://tailwindcss.com/docs/flex-direction
+			"flex-direction": ClassGroup{ClassObject{"flex": ClassGroup{"row", "row-reverse", "col", "col-reverse"}}},
+			// Flex Wrap
+			// @see https://tailwindcss.com/docs/flex-wrap
+			"flex-wrap": ClassGroup{ClassObject{"flex": ClassGroup{"nowrap", "wrap", "wrap-reverse"}}},
+			// Flex
+			// @see https://tailwindcss.com/docs/flex
+			"flex": ClassGroup{ClassObject{"flex": ClassGroup{IsNumber, IsFraction, "auto", "initial", "none", IsArbitraryValue}}},
+			// Flex Grow
+			// @see https://tailwindcss.com/docs/flex-grow
+			"grow": ClassGroup{ClassObject{"grow": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Flex Shrink
+			// @see https://tailwindcss.com/docs/flex-shrink
+			"shrink": ClassGroup{ClassObject{"shrink": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Order
+			// @see https://tailwindcss.com/docs/order
+			"order": ClassGroup{
+				ClassObject{
+					"order": ClassGroup{
+						IsInteger,
+						"first",
+						"last",
+						"none",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Grid Template Columns
+			// @see https://tailwindcss.com/docs/grid-template-columns
+			"grid-cols": ClassGroup{ClassObject{"grid-cols": scaleGridTemplateColsRows()}},
+			// Grid Column Start / End
+			// @see https://tailwindcss.com/docs/grid-column
+			"col-start-end": ClassGroup{ClassObject{"col": scaleGridColRowStartAndEnd()}},
+			// Grid Column Start
+			// @see https://tailwindcss.com/docs/grid-column
+			"col-start": ClassGroup{ClassObject{"col-start": scaleGridColRowStartOrEnd()}},
+			// Grid Column End
+			// @see https://tailwindcss.com/docs/grid-column
+			"col-end": ClassGroup{ClassObject{"col-end": scaleGridColRowStartOrEnd()}},
+			// Grid Template Rows
+			// @see https://tailwindcss.com/docs/grid-template-rows
+			"grid-rows": ClassGroup{ClassObject{"grid-rows": scaleGridTemplateColsRows()}},
+			// Grid Row Start / End
+			// @see https://tailwindcss.com/docs/grid-row
+			"row-start-end": ClassGroup{ClassObject{"row": scaleGridColRowStartAndEnd()}},
+			// Grid Row Start
+			// @see https://tailwindcss.com/docs/grid-row
+			"row-start": ClassGroup{ClassObject{"row-start": scaleGridColRowStartOrEnd()}},
+			// Grid Row End
+			// @see https://tailwindcss.com/docs/grid-row
+			"row-end": ClassGroup{ClassObject{"row-end": scaleGridColRowStartOrEnd()}},
+			// Grid Auto Flow
+			// @see https://tailwindcss.com/docs/grid-auto-flow
+			"grid-flow": ClassGroup{ClassObject{"grid-flow": ClassGroup{"row", "col", "dense", "row-dense", "col-dense"}}},
+			// Grid Auto Columns
+			// @see https://tailwindcss.com/docs/grid-auto-columns
+			"auto-cols": ClassGroup{ClassObject{"auto-cols": scaleGridAutoColsRows()}},
+			// Grid Auto Rows
+			// @see https://tailwindcss.com/docs/grid-auto-rows
+			"auto-rows": ClassGroup{ClassObject{"auto-rows": scaleGridAutoColsRows()}},
+			// Gap
+			// @see https://tailwindcss.com/docs/gap
+			"gap": ClassGroup{ClassObject{"gap": scaleUnambiguousSpacing()}},
+			// Gap X
+			// @see https://tailwindcss.com/docs/gap
+			"gap-x": ClassGroup{ClassObject{"gap-x": scaleUnambiguousSpacing()}},
+			// Gap Y
+			// @see https://tailwindcss.com/docs/gap
+			"gap-y": ClassGroup{ClassObject{"gap-y": scaleUnambiguousSpacing()}},
+			// Justify Content
+			// @see https://tailwindcss.com/docs/justify-content
+			"justify-content": ClassGroup{ClassObject{"justify": concat(scaleAlignPrimaryAxis(), ClassGroup{"normal"})}},
+			// Justify Items
+			// @see https://tailwindcss.com/docs/justify-items
+			"justify-items": ClassGroup{ClassObject{"justify-items": concat(scaleAlignSecondaryAxis(), ClassGroup{"normal"})}},
+			// Justify Self
+			// @see https://tailwindcss.com/docs/justify-self
+			"justify-self": ClassGroup{ClassObject{"justify-self": concat(ClassGroup{"auto"}, scaleAlignSecondaryAxis())}},
+			// Align Content
+			// @see https://tailwindcss.com/docs/align-content
+			"align-content": ClassGroup{ClassObject{"content": concat(ClassGroup{"normal"}, scaleAlignPrimaryAxis())}},
+			// Align Items
+			// @see https://tailwindcss.com/docs/align-items
+			"align-items": ClassGroup{ClassObject{"items": concat(scaleAlignSecondaryAxis(), ClassGroup{ClassObject{"baseline": ClassGroup{"", "last"}}})}},
+			// Align Self
+			// @see https://tailwindcss.com/docs/align-self
+			"align-self": ClassGroup{
+				ClassObject{"self": concat(ClassGroup{"auto"}, scaleAlignSecondaryAxis(), ClassGroup{ClassObject{"baseline": ClassGroup{"", "last"}}})},
+			},
+			// Place Content
+			// @see https://tailwindcss.com/docs/place-content
+			"place-content": ClassGroup{ClassObject{"place-content": scaleAlignPrimaryAxis()}},
+			// Place Items
+			// @see https://tailwindcss.com/docs/place-items
+			"place-items": ClassGroup{ClassObject{"place-items": concat(scaleAlignSecondaryAxis(), ClassGroup{"baseline"})}},
+			// Place Self
+			// @see https://tailwindcss.com/docs/place-self
+			"place-self": ClassGroup{ClassObject{"place-self": concat(ClassGroup{"auto"}, scaleAlignSecondaryAxis())}},
+			// Spacing
+			// Padding
+			// @see https://tailwindcss.com/docs/padding
+			"p": ClassGroup{ClassObject{"p": scaleUnambiguousSpacing()}},
+			// Padding Inline
+			// @see https://tailwindcss.com/docs/padding
+			"px": ClassGroup{ClassObject{"px": scaleUnambiguousSpacing()}},
+			// Padding Block
+			// @see https://tailwindcss.com/docs/padding
+			"py": ClassGroup{ClassObject{"py": scaleUnambiguousSpacing()}},
+			// Padding Inline Start
+			// @see https://tailwindcss.com/docs/padding
+			"ps": ClassGroup{ClassObject{"ps": scaleUnambiguousSpacing()}},
+			// Padding Inline End
+			// @see https://tailwindcss.com/docs/padding
+			"pe": ClassGroup{ClassObject{"pe": scaleUnambiguousSpacing()}},
+			// Padding Block Start
+			// @see https://tailwindcss.com/docs/padding
+			"pbs": ClassGroup{ClassObject{"pbs": scaleUnambiguousSpacing()}},
+			// Padding Block End
+			// @see https://tailwindcss.com/docs/padding
+			"pbe": ClassGroup{ClassObject{"pbe": scaleUnambiguousSpacing()}},
+			// Padding Top
+			// @see https://tailwindcss.com/docs/padding
+			"pt": ClassGroup{ClassObject{"pt": scaleUnambiguousSpacing()}},
+			// Padding Right
+			// @see https://tailwindcss.com/docs/padding
+			"pr": ClassGroup{ClassObject{"pr": scaleUnambiguousSpacing()}},
+			// Padding Bottom
+			// @see https://tailwindcss.com/docs/padding
+			"pb": ClassGroup{ClassObject{"pb": scaleUnambiguousSpacing()}},
+			// Padding Left
+			// @see https://tailwindcss.com/docs/padding
+			"pl": ClassGroup{ClassObject{"pl": scaleUnambiguousSpacing()}},
+			// Margin
+			// @see https://tailwindcss.com/docs/margin
+			"m": ClassGroup{ClassObject{"m": scaleMargin()}},
+			// Margin Inline
+			// @see https://tailwindcss.com/docs/margin
+			"mx": ClassGroup{ClassObject{"mx": scaleMargin()}},
+			// Margin Block
+			// @see https://tailwindcss.com/docs/margin
+			"my": ClassGroup{ClassObject{"my": scaleMargin()}},
+			// Margin Inline Start
+			// @see https://tailwindcss.com/docs/margin
+			"ms": ClassGroup{ClassObject{"ms": scaleMargin()}},
+			// Margin Inline End
+			// @see https://tailwindcss.com/docs/margin
+			"me": ClassGroup{ClassObject{"me": scaleMargin()}},
+			// Margin Block Start
+			// @see https://tailwindcss.com/docs/margin
+			"mbs": ClassGroup{ClassObject{"mbs": scaleMargin()}},
+			// Margin Block End
+			// @see https://tailwindcss.com/docs/margin
+			"mbe": ClassGroup{ClassObject{"mbe": scaleMargin()}},
+			// Margin Top
+			// @see https://tailwindcss.com/docs/margin
+			"mt": ClassGroup{ClassObject{"mt": scaleMargin()}},
+			// Margin Right
+			// @see https://tailwindcss.com/docs/margin
+			"mr": ClassGroup{ClassObject{"mr": scaleMargin()}},
+			// Margin Bottom
+			// @see https://tailwindcss.com/docs/margin
+			"mb": ClassGroup{ClassObject{"mb": scaleMargin()}},
+			// Margin Left
+			// @see https://tailwindcss.com/docs/margin
+			"ml": ClassGroup{ClassObject{"ml": scaleMargin()}},
+			// Space Between X
+			// @see https://tailwindcss.com/docs/margin#adding-space-between-children
+			"space-x": ClassGroup{ClassObject{"space-x": scaleUnambiguousSpacing()}},
+			// Space Between X Reverse
+			// @see https://tailwindcss.com/docs/margin#adding-space-between-children
+			"space-x-reverse": ClassGroup{"space-x-reverse"},
+			// Space Between Y
+			// @see https://tailwindcss.com/docs/margin#adding-space-between-children
+			"space-y": ClassGroup{ClassObject{"space-y": scaleUnambiguousSpacing()}},
+			// Space Between Y Reverse
+			// @see https://tailwindcss.com/docs/margin#adding-space-between-children
+			"space-y-reverse": ClassGroup{"space-y-reverse"},
+
+			// --------------
+			// --- Sizing ---
+			// --------------
+
+			// Size
+			// @see https://tailwindcss.com/docs/width#setting-both-width-and-height
+			"size": ClassGroup{ClassObject{"size": scaleSizing()}},
+			// Inline Size
+			// @see https://tailwindcss.com/docs/width
+			"inline-size": ClassGroup{ClassObject{"inline": concat(ClassGroup{"auto"}, scaleSizingInline())}},
+			// Min-Inline Size
+			// @see https://tailwindcss.com/docs/min-width
+			"min-inline-size": ClassGroup{ClassObject{"min-inline": concat(ClassGroup{"auto"}, scaleSizingInline())}},
+			// Max-Inline Size
+			// @see https://tailwindcss.com/docs/max-width
+			"max-inline-size": ClassGroup{ClassObject{"max-inline": concat(ClassGroup{"none"}, scaleSizingInline())}},
+			// Block Size
+			// @see https://tailwindcss.com/docs/height
+			"block-size": ClassGroup{ClassObject{"block": concat(ClassGroup{"auto"}, scaleSizingBlock())}},
+			// Min-Block Size
+			// @see https://tailwindcss.com/docs/min-height
+			"min-block-size": ClassGroup{ClassObject{"min-block": concat(ClassGroup{"auto"}, scaleSizingBlock())}},
+			// Max-Block Size
+			// @see https://tailwindcss.com/docs/max-height
+			"max-block-size": ClassGroup{ClassObject{"max-block": concat(ClassGroup{"none"}, scaleSizingBlock())}},
+			// Width
+			// @see https://tailwindcss.com/docs/width
+			"w": ClassGroup{ClassObject{"w": concat(ClassGroup{themeContainer, "screen"}, scaleSizing())}},
+			// Min-Width
+			// @see https://tailwindcss.com/docs/min-width
+			"min-w": ClassGroup{
+				ClassObject{
+					"min-w": concat(ClassGroup{
+						themeContainer,
+						"screen",
+						// Deprecated. @see https://github.com/tailwindlabs/tailwindcss.com/issues/2027#issuecomment-2620152757
+						"none",
+					}, scaleSizing()),
+				},
+			},
+			// Max-Width
+			// @see https://tailwindcss.com/docs/max-width
+			"max-w": ClassGroup{
+				ClassObject{
+					"max-w": concat(ClassGroup{
+						themeContainer,
+						"screen",
+						"none",
+						// Deprecated since Tailwind CSS v4.0.0. @see https://github.com/tailwindlabs/tailwindcss.com/issues/2027#issuecomment-2620152757
+						"prose",
+						// Deprecated since Tailwind CSS v4.0.0. @see https://github.com/tailwindlabs/tailwindcss.com/issues/2027#issuecomment-2620152757
+						ClassObject{"screen": ClassGroup{themeBreakpoint}},
+					}, scaleSizing()),
+				},
+			},
+			// Height
+			// @see https://tailwindcss.com/docs/height
+			"h": ClassGroup{ClassObject{"h": concat(ClassGroup{"screen", "lh"}, scaleSizing())}},
+			// Min-Height
+			// @see https://tailwindcss.com/docs/min-height
+			"min-h": ClassGroup{ClassObject{"min-h": concat(ClassGroup{"screen", "lh", "none"}, scaleSizing())}},
+			// Max-Height
+			// @see https://tailwindcss.com/docs/max-height
+			"max-h": ClassGroup{ClassObject{"max-h": concat(ClassGroup{"screen", "lh"}, scaleSizing())}},
+
+			// ------------------
+			// --- Typography ---
+			// ------------------
+
+			// Font Size
+			// @see https://tailwindcss.com/docs/font-size
+			"font-size": ClassGroup{
+				ClassObject{"text": ClassGroup{"base", themeText, IsArbitraryVariableLength, IsArbitraryLength}},
+			},
+			// Font Smoothing
+			// @see https://tailwindcss.com/docs/font-smoothing
+			"font-smoothing": ClassGroup{"antialiased", "subpixel-antialiased"},
+			// Font Style
+			// @see https://tailwindcss.com/docs/font-style
+			"font-style": ClassGroup{"italic", "not-italic"},
+			// Font Weight
+			// @see https://tailwindcss.com/docs/font-weight
+			"font-weight": ClassGroup{
+				ClassObject{
+					"font": ClassGroup{themeFontWeight, IsArbitraryVariableWeight, IsArbitraryWeight},
+				},
+			},
+			// Font Stretch
+			// @see https://tailwindcss.com/docs/font-stretch
+			"font-stretch": ClassGroup{
+				ClassObject{
+					"font-stretch": ClassGroup{
+						"ultra-condensed",
+						"extra-condensed",
+						"condensed",
+						"semi-condensed",
+						"normal",
+						"semi-expanded",
+						"expanded",
+						"extra-expanded",
+						"ultra-expanded",
+						IsPercent,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Font Family
+			// @see https://tailwindcss.com/docs/font-family
+			"font-family": ClassGroup{
+				ClassObject{"font": ClassGroup{IsArbitraryVariableFamilyName, IsArbitraryFamilyName, themeFont}},
+			},
+			// Font Feature Settings
+			// @see https://tailwindcss.com/docs/font-feature-settings
+			"font-features": ClassGroup{ClassObject{"font-features": ClassGroup{IsArbitraryValue}}},
+			// Font Variant Numeric
+			// @see https://tailwindcss.com/docs/font-variant-numeric
+			"fvn-normal": ClassGroup{"normal-nums"},
+			// Font Variant Numeric
+			// @see https://tailwindcss.com/docs/font-variant-numeric
+			"fvn-ordinal": ClassGroup{"ordinal"},
+			// Font Variant Numeric
+			// @see https://tailwindcss.com/docs/font-variant-numeric
+			"fvn-slashed-zero": ClassGroup{"slashed-zero"},
+			// Font Variant Numeric
+			// @see https://tailwindcss.com/docs/font-variant-numeric
+			"fvn-figure": ClassGroup{"lining-nums", "oldstyle-nums"},
+			// Font Variant Numeric
+			// @see https://tailwindcss.com/docs/font-variant-numeric
+			"fvn-spacing": ClassGroup{"proportional-nums", "tabular-nums"},
+			// Font Variant Numeric
+			// @see https://tailwindcss.com/docs/font-variant-numeric
+			"fvn-fraction": ClassGroup{"diagonal-fractions", "stacked-fractions"},
+			// Letter Spacing
+			// @see https://tailwindcss.com/docs/letter-spacing
+			"tracking": ClassGroup{ClassObject{"tracking": ClassGroup{themeTracking, IsArbitraryVariable, IsArbitraryValue}}},
+			// Line Clamp
+			// @see https://tailwindcss.com/docs/line-clamp
+			"line-clamp": ClassGroup{
+				ClassObject{"line-clamp": ClassGroup{IsNumber, "none", IsArbitraryVariable, IsArbitraryNumber}},
+			},
+			// Line Height
+			// @see https://tailwindcss.com/docs/line-height
+			"leading": ClassGroup{
+				ClassObject{
+					"leading": concat(ClassGroup{
+						// Deprecated since Tailwind CSS v4.0.0. @see https://github.com/tailwindlabs/tailwindcss.com/issues/2027#issuecomment-2620152757
+						themeLeading,
+					}, scaleUnambiguousSpacing()),
+				},
+			},
+			// List Style Image
+			// @see https://tailwindcss.com/docs/list-style-image
+			"list-image": ClassGroup{ClassObject{"list-image": ClassGroup{"none", IsArbitraryVariable, IsArbitraryValue}}},
+			// List Style Position
+			// @see https://tailwindcss.com/docs/list-style-position
+			"list-style-position": ClassGroup{ClassObject{"list": ClassGroup{"inside", "outside"}}},
+			// List Style Type
+			// @see https://tailwindcss.com/docs/list-style-type
+			"list-style-type": ClassGroup{
+				ClassObject{"list": ClassGroup{"disc", "decimal", "none", IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Text Alignment
+			// @see https://tailwindcss.com/docs/text-align
+			"text-alignment": ClassGroup{ClassObject{"text": ClassGroup{"left", "center", "right", "justify", "start", "end"}}},
+			// Placeholder Color
+			// @deprecated since Tailwind CSS v3.0.0
+			// @see https://v3.tailwindcss.com/docs/placeholder-color
+			"placeholder-color": ClassGroup{ClassObject{"placeholder": scaleColor()}},
+			// Text Color
+			// @see https://tailwindcss.com/docs/text-color
+			"text-color": ClassGroup{ClassObject{"text": scaleColor()}},
+			// Text Decoration
+			// @see https://tailwindcss.com/docs/text-decoration
+			"text-decoration": ClassGroup{"underline", "overline", "line-through", "no-underline"},
+			// Text Decoration Style
+			// @see https://tailwindcss.com/docs/text-decoration-style
+			"text-decoration-style": ClassGroup{ClassObject{"decoration": concat(scaleLineStyle(), ClassGroup{"wavy"})}},
+			// Text Decoration Thickness
+			// @see https://tailwindcss.com/docs/text-decoration-thickness
+			"text-decoration-thickness": ClassGroup{
+				ClassObject{
+					"decoration": ClassGroup{
+						IsNumber,
+						"from-font",
+						"auto",
+						IsArbitraryVariable,
+						IsArbitraryLength,
+					},
+				},
+			},
+			// Text Decoration Color
+			// @see https://tailwindcss.com/docs/text-decoration-color
+			"text-decoration-color": ClassGroup{ClassObject{"decoration": scaleColor()}},
+			// Text Underline Offset
+			// @see https://tailwindcss.com/docs/text-underline-offset
+			"underline-offset": ClassGroup{
+				ClassObject{"underline-offset": ClassGroup{IsNumber, "auto", IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Text Transform
+			// @see https://tailwindcss.com/docs/text-transform
+			"text-transform": ClassGroup{"uppercase", "lowercase", "capitalize", "normal-case"},
+			// Text Overflow
+			// @see https://tailwindcss.com/docs/text-overflow
+			"text-overflow": ClassGroup{"truncate", "text-ellipsis", "text-clip"},
+			// Text Wrap
+			// @see https://tailwindcss.com/docs/text-wrap
+			"text-wrap": ClassGroup{ClassObject{"text": ClassGroup{"wrap", "nowrap", "balance", "pretty"}}},
+			// Text Indent
+			// @see https://tailwindcss.com/docs/text-indent
+			"indent": ClassGroup{ClassObject{"indent": scaleUnambiguousSpacing()}},
+			// Tab Size
+			// @see https://tailwindcss.com/docs/tab-size
+			"tab-size": ClassGroup{ClassObject{"tab": ClassGroup{IsInteger, IsArbitraryVariable, IsArbitraryValue}}},
+			// Vertical Alignment
+			// @see https://tailwindcss.com/docs/vertical-align
+			"vertical-align": ClassGroup{
+				ClassObject{
+					"align": ClassGroup{
+						"baseline",
+						"top",
+						"middle",
+						"bottom",
+						"text-top",
+						"text-bottom",
+						"sub",
+						"super",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Whitespace
+			// @see https://tailwindcss.com/docs/whitespace
+			"whitespace": ClassGroup{
+				ClassObject{"whitespace": ClassGroup{"normal", "nowrap", "pre", "pre-line", "pre-wrap", "break-spaces"}},
+			},
+			// Word Break
+			// @see https://tailwindcss.com/docs/word-break
+			"break": ClassGroup{ClassObject{"break": ClassGroup{"normal", "words", "all", "keep"}}},
+			// Overflow Wrap
+			// @see https://tailwindcss.com/docs/overflow-wrap
+			"wrap": ClassGroup{ClassObject{"wrap": ClassGroup{"break-word", "anywhere", "normal"}}},
+			// Hyphens
+			// @see https://tailwindcss.com/docs/hyphens
+			"hyphens": ClassGroup{ClassObject{"hyphens": ClassGroup{"none", "manual", "auto"}}},
+			// Content
+			// @see https://tailwindcss.com/docs/content
+			"content": ClassGroup{ClassObject{"content": ClassGroup{"none", IsArbitraryVariable, IsArbitraryValue}}},
+
+			// -------------------
+			// --- Backgrounds ---
+			// -------------------
+
+			// Background Attachment
+			// @see https://tailwindcss.com/docs/background-attachment
+			"bg-attachment": ClassGroup{ClassObject{"bg": ClassGroup{"fixed", "local", "scroll"}}},
+			// Background Clip
+			// @see https://tailwindcss.com/docs/background-clip
+			"bg-clip": ClassGroup{ClassObject{"bg-clip": ClassGroup{"border", "padding", "content", "text"}}},
+			// Background Origin
+			// @see https://tailwindcss.com/docs/background-origin
+			"bg-origin": ClassGroup{ClassObject{"bg-origin": ClassGroup{"border", "padding", "content"}}},
+			// Background Position
+			// @see https://tailwindcss.com/docs/background-position
+			"bg-position": ClassGroup{ClassObject{"bg": scaleBgPosition()}},
+			// Background Repeat
+			// @see https://tailwindcss.com/docs/background-repeat
+			"bg-repeat": ClassGroup{ClassObject{"bg": scaleBgRepeat()}},
+			// Background Size
+			// @see https://tailwindcss.com/docs/background-size
+			"bg-size": ClassGroup{ClassObject{"bg": scaleBgSize()}},
+			// Background Image
+			// @see https://tailwindcss.com/docs/background-image
+			"bg-image": ClassGroup{
+				ClassObject{
+					"bg": ClassGroup{
+						"none",
+						ClassObject{
+							"linear": ClassGroup{
+								ClassObject{"to": ClassGroup{"t", "tr", "r", "br", "b", "bl", "l", "tl"}},
+								IsInteger,
+								IsArbitraryVariable,
+								IsArbitraryValue,
+							},
+							"radial": ClassGroup{"", IsArbitraryVariable, IsArbitraryValue},
+							"conic":  ClassGroup{IsInteger, IsArbitraryVariable, IsArbitraryValue},
+						},
+						IsArbitraryVariableImage,
+						IsArbitraryImage,
+					},
+				},
+			},
+			// Background Color
+			// @see https://tailwindcss.com/docs/background-color
+			"bg-color": ClassGroup{ClassObject{"bg": scaleColor()}},
+			// Gradient Color Stops From Position
+			// @see https://tailwindcss.com/docs/gradient-color-stops
+			"gradient-from-pos": ClassGroup{ClassObject{"from": scaleGradientStopPosition()}},
+			// Gradient Color Stops Via Position
+			// @see https://tailwindcss.com/docs/gradient-color-stops
+			"gradient-via-pos": ClassGroup{ClassObject{"via": scaleGradientStopPosition()}},
+			// Gradient Color Stops To Position
+			// @see https://tailwindcss.com/docs/gradient-color-stops
+			"gradient-to-pos": ClassGroup{ClassObject{"to": scaleGradientStopPosition()}},
+			// Gradient Color Stops From
+			// @see https://tailwindcss.com/docs/gradient-color-stops
+			"gradient-from": ClassGroup{ClassObject{"from": scaleColor()}},
+			// Gradient Color Stops Via
+			// @see https://tailwindcss.com/docs/gradient-color-stops
+			"gradient-via": ClassGroup{ClassObject{"via": scaleColor()}},
+			// Gradient Color Stops To
+			// @see https://tailwindcss.com/docs/gradient-color-stops
+			"gradient-to": ClassGroup{ClassObject{"to": scaleColor()}},
+
+			// ---------------
+			// --- Borders ---
+			// ---------------
+
+			// Border Radius
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded": ClassGroup{ClassObject{"rounded": scaleRadius()}},
+			// Border Radius Start
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-s": ClassGroup{ClassObject{"rounded-s": scaleRadius()}},
+			// Border Radius End
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-e": ClassGroup{ClassObject{"rounded-e": scaleRadius()}},
+			// Border Radius Top
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-t": ClassGroup{ClassObject{"rounded-t": scaleRadius()}},
+			// Border Radius Right
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-r": ClassGroup{ClassObject{"rounded-r": scaleRadius()}},
+			// Border Radius Bottom
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-b": ClassGroup{ClassObject{"rounded-b": scaleRadius()}},
+			// Border Radius Left
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-l": ClassGroup{ClassObject{"rounded-l": scaleRadius()}},
+			// Border Radius Start Start
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-ss": ClassGroup{ClassObject{"rounded-ss": scaleRadius()}},
+			// Border Radius Start End
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-se": ClassGroup{ClassObject{"rounded-se": scaleRadius()}},
+			// Border Radius End End
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-ee": ClassGroup{ClassObject{"rounded-ee": scaleRadius()}},
+			// Border Radius End Start
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-es": ClassGroup{ClassObject{"rounded-es": scaleRadius()}},
+			// Border Radius Top Left
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-tl": ClassGroup{ClassObject{"rounded-tl": scaleRadius()}},
+			// Border Radius Top Right
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-tr": ClassGroup{ClassObject{"rounded-tr": scaleRadius()}},
+			// Border Radius Bottom Right
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-br": ClassGroup{ClassObject{"rounded-br": scaleRadius()}},
+			// Border Radius Bottom Left
+			// @see https://tailwindcss.com/docs/border-radius
+			"rounded-bl": ClassGroup{ClassObject{"rounded-bl": scaleRadius()}},
+			// Border Width
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w": ClassGroup{ClassObject{"border": scaleBorderWidth()}},
+			// Border Width Inline
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-x": ClassGroup{ClassObject{"border-x": scaleBorderWidth()}},
+			// Border Width Block
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-y": ClassGroup{ClassObject{"border-y": scaleBorderWidth()}},
+			// Border Width Inline Start
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-s": ClassGroup{ClassObject{"border-s": scaleBorderWidth()}},
+			// Border Width Inline End
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-e": ClassGroup{ClassObject{"border-e": scaleBorderWidth()}},
+			// Border Width Block Start
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-bs": ClassGroup{ClassObject{"border-bs": scaleBorderWidth()}},
+			// Border Width Block End
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-be": ClassGroup{ClassObject{"border-be": scaleBorderWidth()}},
+			// Border Width Top
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-t": ClassGroup{ClassObject{"border-t": scaleBorderWidth()}},
+			// Border Width Right
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-r": ClassGroup{ClassObject{"border-r": scaleBorderWidth()}},
+			// Border Width Bottom
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-b": ClassGroup{ClassObject{"border-b": scaleBorderWidth()}},
+			// Border Width Left
+			// @see https://tailwindcss.com/docs/border-width
+			"border-w-l": ClassGroup{ClassObject{"border-l": scaleBorderWidth()}},
+			// Divide Width X
+			// @see https://tailwindcss.com/docs/border-width#between-children
+			"divide-x": ClassGroup{ClassObject{"divide-x": scaleBorderWidth()}},
+			// Divide Width X Reverse
+			// @see https://tailwindcss.com/docs/border-width#between-children
+			"divide-x-reverse": ClassGroup{"divide-x-reverse"},
+			// Divide Width Y
+			// @see https://tailwindcss.com/docs/border-width#between-children
+			"divide-y": ClassGroup{ClassObject{"divide-y": scaleBorderWidth()}},
+			// Divide Width Y Reverse
+			// @see https://tailwindcss.com/docs/border-width#between-children
+			"divide-y-reverse": ClassGroup{"divide-y-reverse"},
+			// Border Style
+			// @see https://tailwindcss.com/docs/border-style
+			"border-style": ClassGroup{ClassObject{"border": concat(scaleLineStyle(), ClassGroup{"hidden", "none"})}},
+			// Divide Style
+			// @see https://tailwindcss.com/docs/border-style#setting-the-divider-style
+			"divide-style": ClassGroup{ClassObject{"divide": concat(scaleLineStyle(), ClassGroup{"hidden", "none"})}},
+			// Border Color
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color": ClassGroup{ClassObject{"border": scaleColor()}},
+			// Border Color Inline
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-x": ClassGroup{ClassObject{"border-x": scaleColor()}},
+			// Border Color Block
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-y": ClassGroup{ClassObject{"border-y": scaleColor()}},
+			// Border Color Inline Start
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-s": ClassGroup{ClassObject{"border-s": scaleColor()}},
+			// Border Color Inline End
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-e": ClassGroup{ClassObject{"border-e": scaleColor()}},
+			// Border Color Block Start
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-bs": ClassGroup{ClassObject{"border-bs": scaleColor()}},
+			// Border Color Block End
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-be": ClassGroup{ClassObject{"border-be": scaleColor()}},
+			// Border Color Top
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-t": ClassGroup{ClassObject{"border-t": scaleColor()}},
+			// Border Color Right
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-r": ClassGroup{ClassObject{"border-r": scaleColor()}},
+			// Border Color Bottom
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-b": ClassGroup{ClassObject{"border-b": scaleColor()}},
+			// Border Color Left
+			// @see https://tailwindcss.com/docs/border-color
+			"border-color-l": ClassGroup{ClassObject{"border-l": scaleColor()}},
+			// Divide Color
+			// @see https://tailwindcss.com/docs/divide-color
+			"divide-color": ClassGroup{ClassObject{"divide": scaleColor()}},
+			// Outline Style
+			// @see https://tailwindcss.com/docs/outline-style
+			"outline-style": ClassGroup{ClassObject{"outline": concat(scaleLineStyle(), ClassGroup{"none", "hidden"})}},
+			// Outline Offset
+			// @see https://tailwindcss.com/docs/outline-offset
+			"outline-offset": ClassGroup{
+				ClassObject{"outline-offset": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Outline Width
+			// @see https://tailwindcss.com/docs/outline-width
+			"outline-w": ClassGroup{
+				ClassObject{"outline": ClassGroup{"", IsNumber, IsArbitraryVariableLength, IsArbitraryLength}},
+			},
+			// Outline Color
+			// @see https://tailwindcss.com/docs/outline-color
+			"outline-color": ClassGroup{ClassObject{"outline": scaleColor()}},
+
+			// ---------------
+			// --- Effects ---
+			// ---------------
+
+			// Box Shadow
+			// @see https://tailwindcss.com/docs/box-shadow
+			"shadow": ClassGroup{
+				ClassObject{
+					"shadow": ClassGroup{
+						// Deprecated since Tailwind CSS v4.0.0
+						"",
+						"none",
+						themeShadow,
+						IsArbitraryVariableShadow,
+						IsArbitraryShadow,
+					},
+				},
+			},
+			// Box Shadow Color
+			// @see https://tailwindcss.com/docs/box-shadow#setting-the-shadow-color
+			"shadow-color": ClassGroup{ClassObject{"shadow": scaleColor()}},
+			// Inset Box Shadow
+			// @see https://tailwindcss.com/docs/box-shadow#adding-an-inset-shadow
+			"inset-shadow": ClassGroup{
+				ClassObject{
+					"inset-shadow": ClassGroup{
+						"none",
+						themeInsetShadow,
+						IsArbitraryVariableShadow,
+						IsArbitraryShadow,
+					},
+				},
+			},
+			// Inset Box Shadow Color
+			// @see https://tailwindcss.com/docs/box-shadow#setting-the-inset-shadow-color
+			"inset-shadow-color": ClassGroup{ClassObject{"inset-shadow": scaleColor()}},
+			// Ring Width
+			// @see https://tailwindcss.com/docs/box-shadow#adding-a-ring
+			"ring-w": ClassGroup{ClassObject{"ring": scaleBorderWidth()}},
+			// Ring Width Inset
+			// @see https://v3.tailwindcss.com/docs/ring-width#inset-rings
+			// @deprecated since Tailwind CSS v4.0.0
+			// @see https://github.com/tailwindlabs/tailwindcss/blob/v4.0.0/packages/tailwindcss/src/utilities.ts#L4158
+			"ring-w-inset": ClassGroup{"ring-inset"},
+			// Ring Color
+			// @see https://tailwindcss.com/docs/box-shadow#setting-the-ring-color
+			"ring-color": ClassGroup{ClassObject{"ring": scaleColor()}},
+			// Ring Offset Width
+			// @see https://v3.tailwindcss.com/docs/ring-offset-width
+			// @deprecated since Tailwind CSS v4.0.0
+			// @see https://github.com/tailwindlabs/tailwindcss/blob/v4.0.0/packages/tailwindcss/src/utilities.ts#L4158
+			"ring-offset-w": ClassGroup{ClassObject{"ring-offset": ClassGroup{IsNumber, IsArbitraryLength}}},
+			// Ring Offset Color
+			// @see https://v3.tailwindcss.com/docs/ring-offset-color
+			// @deprecated since Tailwind CSS v4.0.0
+			// @see https://github.com/tailwindlabs/tailwindcss/blob/v4.0.0/packages/tailwindcss/src/utilities.ts#L4158
+			"ring-offset-color": ClassGroup{ClassObject{"ring-offset": scaleColor()}},
+			// Inset Ring Width
+			// @see https://tailwindcss.com/docs/box-shadow#adding-an-inset-ring
+			"inset-ring-w": ClassGroup{ClassObject{"inset-ring": scaleBorderWidth()}},
+			// Inset Ring Color
+			// @see https://tailwindcss.com/docs/box-shadow#setting-the-inset-ring-color
+			"inset-ring-color": ClassGroup{ClassObject{"inset-ring": scaleColor()}},
+			// Text Shadow
+			// @see https://tailwindcss.com/docs/text-shadow
+			"text-shadow": ClassGroup{
+				ClassObject{
+					"text-shadow": ClassGroup{
+						"none",
+						themeTextShadow,
+						IsArbitraryVariableShadow,
+						IsArbitraryShadow,
+					},
+				},
+			},
+			// Text Shadow Color
+			// @see https://tailwindcss.com/docs/text-shadow#setting-the-shadow-color
+			"text-shadow-color": ClassGroup{ClassObject{"text-shadow": scaleColor()}},
+			// Opacity
+			// @see https://tailwindcss.com/docs/opacity
+			"opacity": ClassGroup{ClassObject{"opacity": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Mix Blend Mode
+			// @see https://tailwindcss.com/docs/mix-blend-mode
+			"mix-blend": ClassGroup{ClassObject{"mix-blend": concat(scaleBlendMode(), ClassGroup{"plus-darker", "plus-lighter"})}},
+			// Background Blend Mode
+			// @see https://tailwindcss.com/docs/background-blend-mode
+			"bg-blend": ClassGroup{ClassObject{"bg-blend": scaleBlendMode()}},
+			// Mask Clip
+			// @see https://tailwindcss.com/docs/mask-clip
+			"mask-clip": ClassGroup{
+				ClassObject{"mask-clip": ClassGroup{"border", "padding", "content", "fill", "stroke", "view"}},
+				"mask-no-clip",
+			},
+			// Mask Composite
+			// @see https://tailwindcss.com/docs/mask-composite
+			"mask-composite": ClassGroup{ClassObject{"mask": ClassGroup{"add", "subtract", "intersect", "exclude"}}},
+			// Mask Image
+			// @see https://tailwindcss.com/docs/mask-image
+			"mask-image-linear-pos":         ClassGroup{ClassObject{"mask-linear": ClassGroup{IsNumber}}},
+			"mask-image-linear-from-pos":    ClassGroup{ClassObject{"mask-linear-from": scaleMaskImagePosition()}},
+			"mask-image-linear-to-pos":      ClassGroup{ClassObject{"mask-linear-to": scaleMaskImagePosition()}},
+			"mask-image-linear-from-color":  ClassGroup{ClassObject{"mask-linear-from": scaleColor()}},
+			"mask-image-linear-to-color":    ClassGroup{ClassObject{"mask-linear-to": scaleColor()}},
+			"mask-image-t-from-pos":         ClassGroup{ClassObject{"mask-t-from": scaleMaskImagePosition()}},
+			"mask-image-t-to-pos":           ClassGroup{ClassObject{"mask-t-to": scaleMaskImagePosition()}},
+			"mask-image-t-from-color":       ClassGroup{ClassObject{"mask-t-from": scaleColor()}},
+			"mask-image-t-to-color":         ClassGroup{ClassObject{"mask-t-to": scaleColor()}},
+			"mask-image-r-from-pos":         ClassGroup{ClassObject{"mask-r-from": scaleMaskImagePosition()}},
+			"mask-image-r-to-pos":           ClassGroup{ClassObject{"mask-r-to": scaleMaskImagePosition()}},
+			"mask-image-r-from-color":       ClassGroup{ClassObject{"mask-r-from": scaleColor()}},
+			"mask-image-r-to-color":         ClassGroup{ClassObject{"mask-r-to": scaleColor()}},
+			"mask-image-b-from-pos":         ClassGroup{ClassObject{"mask-b-from": scaleMaskImagePosition()}},
+			"mask-image-b-to-pos":           ClassGroup{ClassObject{"mask-b-to": scaleMaskImagePosition()}},
+			"mask-image-b-from-color":       ClassGroup{ClassObject{"mask-b-from": scaleColor()}},
+			"mask-image-b-to-color":         ClassGroup{ClassObject{"mask-b-to": scaleColor()}},
+			"mask-image-l-from-pos":         ClassGroup{ClassObject{"mask-l-from": scaleMaskImagePosition()}},
+			"mask-image-l-to-pos":           ClassGroup{ClassObject{"mask-l-to": scaleMaskImagePosition()}},
+			"mask-image-l-from-color":       ClassGroup{ClassObject{"mask-l-from": scaleColor()}},
+			"mask-image-l-to-color":         ClassGroup{ClassObject{"mask-l-to": scaleColor()}},
+			"mask-image-x-from-pos":         ClassGroup{ClassObject{"mask-x-from": scaleMaskImagePosition()}},
+			"mask-image-x-to-pos":           ClassGroup{ClassObject{"mask-x-to": scaleMaskImagePosition()}},
+			"mask-image-x-from-color":       ClassGroup{ClassObject{"mask-x-from": scaleColor()}},
+			"mask-image-x-to-color":         ClassGroup{ClassObject{"mask-x-to": scaleColor()}},
+			"mask-image-y-from-pos":         ClassGroup{ClassObject{"mask-y-from": scaleMaskImagePosition()}},
+			"mask-image-y-to-pos":           ClassGroup{ClassObject{"mask-y-to": scaleMaskImagePosition()}},
+			"mask-image-y-from-color":       ClassGroup{ClassObject{"mask-y-from": scaleColor()}},
+			"mask-image-y-to-color":         ClassGroup{ClassObject{"mask-y-to": scaleColor()}},
+			"mask-image-radial":             ClassGroup{ClassObject{"mask-radial": ClassGroup{IsArbitraryVariable, IsArbitraryValue}}},
+			"mask-image-radial-from-pos":    ClassGroup{ClassObject{"mask-radial-from": scaleMaskImagePosition()}},
+			"mask-image-radial-to-pos":      ClassGroup{ClassObject{"mask-radial-to": scaleMaskImagePosition()}},
+			"mask-image-radial-from-color":  ClassGroup{ClassObject{"mask-radial-from": scaleColor()}},
+			"mask-image-radial-to-color":    ClassGroup{ClassObject{"mask-radial-to": scaleColor()}},
+			"mask-image-radial-shape":       ClassGroup{ClassObject{"mask-radial": ClassGroup{"circle", "ellipse"}}},
+			"mask-image-radial-size": ClassGroup{
+				ClassObject{
+					"mask-radial": ClassGroup{
+						ClassObject{
+							"closest":  ClassGroup{"side", "corner"},
+							"farthest": ClassGroup{"side", "corner"},
+						},
+					},
+				},
+			},
+			"mask-image-radial-pos":        ClassGroup{ClassObject{"mask-radial-at": scalePosition()}},
+			"mask-image-conic-pos":         ClassGroup{ClassObject{"mask-conic": ClassGroup{IsNumber}}},
+			"mask-image-conic-from-pos":    ClassGroup{ClassObject{"mask-conic-from": scaleMaskImagePosition()}},
+			"mask-image-conic-to-pos":      ClassGroup{ClassObject{"mask-conic-to": scaleMaskImagePosition()}},
+			"mask-image-conic-from-color":  ClassGroup{ClassObject{"mask-conic-from": scaleColor()}},
+			"mask-image-conic-to-color":    ClassGroup{ClassObject{"mask-conic-to": scaleColor()}},
+			// Mask Mode
+			// @see https://tailwindcss.com/docs/mask-mode
+			"mask-mode": ClassGroup{ClassObject{"mask": ClassGroup{"alpha", "luminance", "match"}}},
+			// Mask Origin
+			// @see https://tailwindcss.com/docs/mask-origin
+			"mask-origin": ClassGroup{
+				ClassObject{"mask-origin": ClassGroup{"border", "padding", "content", "fill", "stroke", "view"}},
+			},
+			// Mask Position
+			// @see https://tailwindcss.com/docs/mask-position
+			"mask-position": ClassGroup{ClassObject{"mask": scaleBgPosition()}},
+			// Mask Repeat
+			// @see https://tailwindcss.com/docs/mask-repeat
+			"mask-repeat": ClassGroup{ClassObject{"mask": scaleBgRepeat()}},
+			// Mask Size
+			// @see https://tailwindcss.com/docs/mask-size
+			"mask-size": ClassGroup{ClassObject{"mask": scaleBgSize()}},
+			// Mask Type
+			// @see https://tailwindcss.com/docs/mask-type
+			"mask-type": ClassGroup{ClassObject{"mask-type": ClassGroup{"alpha", "luminance"}}},
+			// Mask Image
+			// @see https://tailwindcss.com/docs/mask-image
+			"mask-image": ClassGroup{ClassObject{"mask": ClassGroup{"none", IsArbitraryVariable, IsArbitraryValue}}},
+
+			// ---------------
+			// --- Filters ---
+			// ---------------
+
+			// Filter
+			// @see https://tailwindcss.com/docs/filter
+			"filter": ClassGroup{
+				ClassObject{
+					"filter": ClassGroup{
+						// Deprecated since Tailwind CSS v3.0.0
+						"",
+						"none",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Blur
+			// @see https://tailwindcss.com/docs/blur
+			"blur": ClassGroup{ClassObject{"blur": scaleBlur()}},
+			// Brightness
+			// @see https://tailwindcss.com/docs/brightness
+			"brightness": ClassGroup{ClassObject{"brightness": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Contrast
+			// @see https://tailwindcss.com/docs/contrast
+			"contrast": ClassGroup{ClassObject{"contrast": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Drop Shadow
+			// @see https://tailwindcss.com/docs/drop-shadow
+			"drop-shadow": ClassGroup{
+				ClassObject{
+					"drop-shadow": ClassGroup{
+						// Deprecated since Tailwind CSS v4.0.0
+						"",
+						"none",
+						themeDropShadow,
+						IsArbitraryVariableShadow,
+						IsArbitraryShadow,
+					},
+				},
+			},
+			// Drop Shadow Color
+			// @see https://tailwindcss.com/docs/filter-drop-shadow#setting-the-shadow-color
+			"drop-shadow-color": ClassGroup{ClassObject{"drop-shadow": scaleColor()}},
+			// Grayscale
+			// @see https://tailwindcss.com/docs/grayscale
+			"grayscale": ClassGroup{ClassObject{"grayscale": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Hue Rotate
+			// @see https://tailwindcss.com/docs/hue-rotate
+			"hue-rotate": ClassGroup{ClassObject{"hue-rotate": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Invert
+			// @see https://tailwindcss.com/docs/invert
+			"invert": ClassGroup{ClassObject{"invert": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Saturate
+			// @see https://tailwindcss.com/docs/saturate
+			"saturate": ClassGroup{ClassObject{"saturate": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Sepia
+			// @see https://tailwindcss.com/docs/sepia
+			"sepia": ClassGroup{ClassObject{"sepia": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Backdrop Filter
+			// @see https://tailwindcss.com/docs/backdrop-filter
+			"backdrop-filter": ClassGroup{
+				ClassObject{
+					"backdrop-filter": ClassGroup{
+						// Deprecated since Tailwind CSS v3.0.0
+						"",
+						"none",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Backdrop Blur
+			// @see https://tailwindcss.com/docs/backdrop-blur
+			"backdrop-blur": ClassGroup{ClassObject{"backdrop-blur": scaleBlur()}},
+			// Backdrop Brightness
+			// @see https://tailwindcss.com/docs/backdrop-brightness
+			"backdrop-brightness": ClassGroup{
+				ClassObject{"backdrop-brightness": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Contrast
+			// @see https://tailwindcss.com/docs/backdrop-contrast
+			"backdrop-contrast": ClassGroup{
+				ClassObject{"backdrop-contrast": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Grayscale
+			// @see https://tailwindcss.com/docs/backdrop-grayscale
+			"backdrop-grayscale": ClassGroup{
+				ClassObject{"backdrop-grayscale": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Hue Rotate
+			// @see https://tailwindcss.com/docs/backdrop-hue-rotate
+			"backdrop-hue-rotate": ClassGroup{
+				ClassObject{"backdrop-hue-rotate": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Invert
+			// @see https://tailwindcss.com/docs/backdrop-invert
+			"backdrop-invert": ClassGroup{
+				ClassObject{"backdrop-invert": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Opacity
+			// @see https://tailwindcss.com/docs/backdrop-opacity
+			"backdrop-opacity": ClassGroup{
+				ClassObject{"backdrop-opacity": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Saturate
+			// @see https://tailwindcss.com/docs/backdrop-saturate
+			"backdrop-saturate": ClassGroup{
+				ClassObject{"backdrop-saturate": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Backdrop Sepia
+			// @see https://tailwindcss.com/docs/backdrop-sepia
+			"backdrop-sepia": ClassGroup{
+				ClassObject{"backdrop-sepia": ClassGroup{"", IsNumber, IsArbitraryVariable, IsArbitraryValue}},
+			},
+
+			// --------------
+			// --- Tables ---
+			// --------------
+
+			// Border Collapse
+			// @see https://tailwindcss.com/docs/border-collapse
+			"border-collapse": ClassGroup{ClassObject{"border": ClassGroup{"collapse", "separate"}}},
+			// Border Spacing
+			// @see https://tailwindcss.com/docs/border-spacing
+			"border-spacing": ClassGroup{ClassObject{"border-spacing": scaleUnambiguousSpacing()}},
+			// Border Spacing X
+			// @see https://tailwindcss.com/docs/border-spacing
+			"border-spacing-x": ClassGroup{ClassObject{"border-spacing-x": scaleUnambiguousSpacing()}},
+			// Border Spacing Y
+			// @see https://tailwindcss.com/docs/border-spacing
+			"border-spacing-y": ClassGroup{ClassObject{"border-spacing-y": scaleUnambiguousSpacing()}},
+			// Table Layout
+			// @see https://tailwindcss.com/docs/table-layout
+			"table-layout": ClassGroup{ClassObject{"table": ClassGroup{"auto", "fixed"}}},
+			// Caption Side
+			// @see https://tailwindcss.com/docs/caption-side
+			"caption": ClassGroup{ClassObject{"caption": ClassGroup{"top", "bottom"}}},
+
+			// ---------------------------------
+			// --- Transitions and Animation ---
+			// ---------------------------------
+
+			// Transition Property
+			// @see https://tailwindcss.com/docs/transition-property
+			"transition": ClassGroup{
+				ClassObject{
+					"transition": ClassGroup{
+						"",
+						"all",
+						"colors",
+						"opacity",
+						"shadow",
+						"transform",
+						"none",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Transition Behavior
+			// @see https://tailwindcss.com/docs/transition-behavior
+			"transition-behavior": ClassGroup{ClassObject{"transition": ClassGroup{"normal", "discrete"}}},
+			// Transition Duration
+			// @see https://tailwindcss.com/docs/transition-duration
+			"duration": ClassGroup{ClassObject{"duration": ClassGroup{IsNumber, "initial", IsArbitraryVariable, IsArbitraryValue}}},
+			// Transition Timing Function
+			// @see https://tailwindcss.com/docs/transition-timing-function
+			"ease": ClassGroup{
+				ClassObject{"ease": ClassGroup{"linear", "initial", themeEase, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Transition Delay
+			// @see https://tailwindcss.com/docs/transition-delay
+			"delay": ClassGroup{ClassObject{"delay": ClassGroup{IsNumber, IsArbitraryVariable, IsArbitraryValue}}},
+			// Animation
+			// @see https://tailwindcss.com/docs/animation
+			"animate": ClassGroup{ClassObject{"animate": ClassGroup{"none", themeAnimate, IsArbitraryVariable, IsArbitraryValue}}},
+
+			// ------------------
+			// --- Transforms ---
+			// ------------------
+
+			// Backface Visibility
+			// @see https://tailwindcss.com/docs/backface-visibility
+			"backface": ClassGroup{ClassObject{"backface": ClassGroup{"hidden", "visible"}}},
+			// Perspective
+			// @see https://tailwindcss.com/docs/perspective
+			"perspective": ClassGroup{
+				ClassObject{"perspective": ClassGroup{themePerspective, IsArbitraryVariable, IsArbitraryValue}},
+			},
+			// Perspective Origin
+			// @see https://tailwindcss.com/docs/perspective-origin
+			"perspective-origin": ClassGroup{ClassObject{"perspective-origin": scalePositionWithArbitrary()}},
+			// Rotate
+			// @see https://tailwindcss.com/docs/rotate
+			"rotate": ClassGroup{ClassObject{"rotate": scaleRotate()}},
+			// Rotate X
+			// @see https://tailwindcss.com/docs/rotate
+			"rotate-x": ClassGroup{ClassObject{"rotate-x": scaleRotate()}},
+			// Rotate Y
+			// @see https://tailwindcss.com/docs/rotate
+			"rotate-y": ClassGroup{ClassObject{"rotate-y": scaleRotate()}},
+			// Rotate Z
+			// @see https://tailwindcss.com/docs/rotate
+			"rotate-z": ClassGroup{ClassObject{"rotate-z": scaleRotate()}},
+			// Scale
+			// @see https://tailwindcss.com/docs/scale
+			"scale": ClassGroup{ClassObject{"scale": scaleScale()}},
+			// Scale X
+			// @see https://tailwindcss.com/docs/scale
+			"scale-x": ClassGroup{ClassObject{"scale-x": scaleScale()}},
+			// Scale Y
+			// @see https://tailwindcss.com/docs/scale
+			"scale-y": ClassGroup{ClassObject{"scale-y": scaleScale()}},
+			// Scale Z
+			// @see https://tailwindcss.com/docs/scale
+			"scale-z": ClassGroup{ClassObject{"scale-z": scaleScale()}},
+			// Scale 3D
+			// @see https://tailwindcss.com/docs/scale
+			"scale-3d": ClassGroup{"scale-3d"},
+			// Skew
+			// @see https://tailwindcss.com/docs/skew
+			"skew": ClassGroup{ClassObject{"skew": scaleSkew()}},
+			// Skew X
+			// @see https://tailwindcss.com/docs/skew
+			"skew-x": ClassGroup{ClassObject{"skew-x": scaleSkew()}},
+			// Skew Y
+			// @see https://tailwindcss.com/docs/skew
+			"skew-y": ClassGroup{ClassObject{"skew-y": scaleSkew()}},
+			// Transform
+			// @see https://tailwindcss.com/docs/transform
+			"transform": ClassGroup{
+				ClassObject{"transform": ClassGroup{IsArbitraryVariable, IsArbitraryValue, "", "none", "gpu", "cpu"}},
+			},
+			// Transform Origin
+			// @see https://tailwindcss.com/docs/transform-origin
+			"transform-origin": ClassGroup{ClassObject{"origin": scalePositionWithArbitrary()}},
+			// Transform Style
+			// @see https://tailwindcss.com/docs/transform-style
+			"transform-style": ClassGroup{ClassObject{"transform": ClassGroup{"3d", "flat"}}},
+			// Translate
+			// @see https://tailwindcss.com/docs/translate
+			"translate": ClassGroup{ClassObject{"translate": scaleTranslate()}},
+			// Translate X
+			// @see https://tailwindcss.com/docs/translate
+			"translate-x": ClassGroup{ClassObject{"translate-x": scaleTranslate()}},
+			// Translate Y
+			// @see https://tailwindcss.com/docs/translate
+			"translate-y": ClassGroup{ClassObject{"translate-y": scaleTranslate()}},
+			// Translate Z
+			// @see https://tailwindcss.com/docs/translate
+			"translate-z": ClassGroup{ClassObject{"translate-z": scaleTranslate()}},
+			// Translate None
+			// @see https://tailwindcss.com/docs/translate
+			"translate-none": ClassGroup{"translate-none"},
+			// Zoom
+			// @see https://tailwindcss.com/docs/zoom
+			"zoom": ClassGroup{ClassObject{"zoom": ClassGroup{IsInteger, IsArbitraryVariable, IsArbitraryValue}}},
+
+			// ---------------------
+			// --- Interactivity ---
+			// ---------------------
+
+			// Accent Color
+			// @see https://tailwindcss.com/docs/accent-color
+			"accent": ClassGroup{ClassObject{"accent": scaleColor()}},
+			// Appearance
+			// @see https://tailwindcss.com/docs/appearance
+			"appearance": ClassGroup{ClassObject{"appearance": ClassGroup{"none", "auto"}}},
+			// Caret Color
+			// @see https://tailwindcss.com/docs/just-in-time-mode#caret-color-utilities
+			"caret-color": ClassGroup{ClassObject{"caret": scaleColor()}},
+			// Color Scheme
+			// @see https://tailwindcss.com/docs/color-scheme
+			"color-scheme": ClassGroup{
+				ClassObject{"scheme": ClassGroup{"normal", "dark", "light", "light-dark", "only-dark", "only-light"}},
+			},
+			// Cursor
+			// @see https://tailwindcss.com/docs/cursor
+			"cursor": ClassGroup{
+				ClassObject{
+					"cursor": ClassGroup{
+						"auto",
+						"default",
+						"pointer",
+						"wait",
+						"text",
+						"move",
+						"help",
+						"not-allowed",
+						"none",
+						"context-menu",
+						"progress",
+						"cell",
+						"crosshair",
+						"vertical-text",
+						"alias",
+						"copy",
+						"no-drop",
+						"grab",
+						"grabbing",
+						"all-scroll",
+						"col-resize",
+						"row-resize",
+						"n-resize",
+						"e-resize",
+						"s-resize",
+						"w-resize",
+						"ne-resize",
+						"nw-resize",
+						"se-resize",
+						"sw-resize",
+						"ew-resize",
+						"ns-resize",
+						"nesw-resize",
+						"nwse-resize",
+						"zoom-in",
+						"zoom-out",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+			// Field Sizing
+			// @see https://tailwindcss.com/docs/field-sizing
+			"field-sizing": ClassGroup{ClassObject{"field-sizing": ClassGroup{"fixed", "content"}}},
+			// Pointer Events
+			// @see https://tailwindcss.com/docs/pointer-events
+			"pointer-events": ClassGroup{ClassObject{"pointer-events": ClassGroup{"auto", "none"}}},
+			// Resize
+			// @see https://tailwindcss.com/docs/resize
+			"resize": ClassGroup{ClassObject{"resize": ClassGroup{"none", "", "y", "x"}}},
+			// Scroll Behavior
+			// @see https://tailwindcss.com/docs/scroll-behavior
+			"scroll-behavior": ClassGroup{ClassObject{"scroll": ClassGroup{"auto", "smooth"}}},
+			// Scrollbar Thumb Color
+			// @see https://tailwindcss.com/docs/scrollbar-color
+			"scrollbar-thumb-color": ClassGroup{ClassObject{"scrollbar-thumb": scaleColor()}},
+			// Scrollbar Track Color
+			// @see https://tailwindcss.com/docs/scrollbar-color
+			"scrollbar-track-color": ClassGroup{ClassObject{"scrollbar-track": scaleColor()}},
+			// Scrollbar Gutter
+			// @see https://tailwindcss.com/docs/scrollbar-gutter
+			"scrollbar-gutter": ClassGroup{ClassObject{"scrollbar-gutter": ClassGroup{"auto", "stable", "both"}}},
+			// Scrollbar Width
+			// @see https://tailwindcss.com/docs/scrollbar-width
+			"scrollbar-w": ClassGroup{ClassObject{"scrollbar": ClassGroup{"auto", "thin", "none"}}},
+			// Scroll Margin
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-m": ClassGroup{ClassObject{"scroll-m": scaleUnambiguousSpacing()}},
+			// Scroll Margin Inline
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-mx": ClassGroup{ClassObject{"scroll-mx": scaleUnambiguousSpacing()}},
+			// Scroll Margin Block
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-my": ClassGroup{ClassObject{"scroll-my": scaleUnambiguousSpacing()}},
+			// Scroll Margin Inline Start
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-ms": ClassGroup{ClassObject{"scroll-ms": scaleUnambiguousSpacing()}},
+			// Scroll Margin Inline End
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-me": ClassGroup{ClassObject{"scroll-me": scaleUnambiguousSpacing()}},
+			// Scroll Margin Block Start
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-mbs": ClassGroup{ClassObject{"scroll-mbs": scaleUnambiguousSpacing()}},
+			// Scroll Margin Block End
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-mbe": ClassGroup{ClassObject{"scroll-mbe": scaleUnambiguousSpacing()}},
+			// Scroll Margin Top
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-mt": ClassGroup{ClassObject{"scroll-mt": scaleUnambiguousSpacing()}},
+			// Scroll Margin Right
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-mr": ClassGroup{ClassObject{"scroll-mr": scaleUnambiguousSpacing()}},
+			// Scroll Margin Bottom
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-mb": ClassGroup{ClassObject{"scroll-mb": scaleUnambiguousSpacing()}},
+			// Scroll Margin Left
+			// @see https://tailwindcss.com/docs/scroll-margin
+			"scroll-ml": ClassGroup{ClassObject{"scroll-ml": scaleUnambiguousSpacing()}},
+			// Scroll Padding
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-p": ClassGroup{ClassObject{"scroll-p": scaleUnambiguousSpacing()}},
+			// Scroll Padding Inline
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-px": ClassGroup{ClassObject{"scroll-px": scaleUnambiguousSpacing()}},
+			// Scroll Padding Block
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-py": ClassGroup{ClassObject{"scroll-py": scaleUnambiguousSpacing()}},
+			// Scroll Padding Inline Start
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-ps": ClassGroup{ClassObject{"scroll-ps": scaleUnambiguousSpacing()}},
+			// Scroll Padding Inline End
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pe": ClassGroup{ClassObject{"scroll-pe": scaleUnambiguousSpacing()}},
+			// Scroll Padding Block Start
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pbs": ClassGroup{ClassObject{"scroll-pbs": scaleUnambiguousSpacing()}},
+			// Scroll Padding Block End
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pbe": ClassGroup{ClassObject{"scroll-pbe": scaleUnambiguousSpacing()}},
+			// Scroll Padding Top
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pt": ClassGroup{ClassObject{"scroll-pt": scaleUnambiguousSpacing()}},
+			// Scroll Padding Right
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pr": ClassGroup{ClassObject{"scroll-pr": scaleUnambiguousSpacing()}},
+			// Scroll Padding Bottom
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pb": ClassGroup{ClassObject{"scroll-pb": scaleUnambiguousSpacing()}},
+			// Scroll Padding Left
+			// @see https://tailwindcss.com/docs/scroll-padding
+			"scroll-pl": ClassGroup{ClassObject{"scroll-pl": scaleUnambiguousSpacing()}},
+			// Scroll Snap Align
+			// @see https://tailwindcss.com/docs/scroll-snap-align
+			"snap-align": ClassGroup{ClassObject{"snap": ClassGroup{"start", "end", "center", "align-none"}}},
+			// Scroll Snap Stop
+			// @see https://tailwindcss.com/docs/scroll-snap-stop
+			"snap-stop": ClassGroup{ClassObject{"snap": ClassGroup{"normal", "always"}}},
+			// Scroll Snap Type
+			// @see https://tailwindcss.com/docs/scroll-snap-type
+			"snap-type": ClassGroup{ClassObject{"snap": ClassGroup{"none", "x", "y", "both"}}},
+			// Scroll Snap Type Strictness
+			// @see https://tailwindcss.com/docs/scroll-snap-type
+			"snap-strictness": ClassGroup{ClassObject{"snap": ClassGroup{"mandatory", "proximity"}}},
+			// Touch Action
+			// @see https://tailwindcss.com/docs/touch-action
+			"touch": ClassGroup{ClassObject{"touch": ClassGroup{"auto", "none", "manipulation"}}},
+			// Touch Action X
+			// @see https://tailwindcss.com/docs/touch-action
+			"touch-x": ClassGroup{ClassObject{"touch-pan": ClassGroup{"x", "left", "right"}}},
+			// Touch Action Y
+			// @see https://tailwindcss.com/docs/touch-action
+			"touch-y": ClassGroup{ClassObject{"touch-pan": ClassGroup{"y", "up", "down"}}},
+			// Touch Action Pinch Zoom
+			// @see https://tailwindcss.com/docs/touch-action
+			"touch-pz": ClassGroup{"touch-pinch-zoom"},
+			// User Select
+			// @see https://tailwindcss.com/docs/user-select
+			"select": ClassGroup{ClassObject{"select": ClassGroup{"none", "text", "all", "auto"}}},
+			// Will Change
+			// @see https://tailwindcss.com/docs/will-change
+			"will-change": ClassGroup{
+				ClassObject{
+					"will-change": ClassGroup{
+						"auto",
+						"scroll",
+						"contents",
+						"transform",
+						IsArbitraryVariable,
+						IsArbitraryValue,
+					},
+				},
+			},
+
+			// -----------
+			// --- SVG ---
+			// -----------
+
+			// Fill
+			// @see https://tailwindcss.com/docs/fill
+			"fill": ClassGroup{ClassObject{"fill": concat(ClassGroup{"none"}, scaleColor())}},
+			// Stroke Width
+			// @see https://tailwindcss.com/docs/stroke-width
+			"stroke-w": ClassGroup{
+				ClassObject{
+					"stroke": ClassGroup{
+						IsNumber,
+						IsArbitraryVariableLength,
+						IsArbitraryLength,
+						IsArbitraryNumber,
+					},
+				},
+			},
+			// Stroke
+			// @see https://tailwindcss.com/docs/stroke
+			"stroke": ClassGroup{ClassObject{"stroke": concat(ClassGroup{"none"}, scaleColor())}},
+
+			// ---------------------
+			// --- Accessibility ---
+			// ---------------------
+
+			// Forced Color Adjust
+			// @see https://tailwindcss.com/docs/forced-color-adjust
+			"forced-color-adjust": ClassGroup{ClassObject{"forced-color-adjust": ClassGroup{"auto", "none"}}},
+		},
+		ConflictingClassGroups: ConflictingClassGroupsMap{
+			"container-named": {"container-type"},
+			"overflow":        {"overflow-x", "overflow-y"},
+			"overscroll":      {"overscroll-x", "overscroll-y"},
+			"inset": {
+				"inset-x",
+				"inset-y",
+				"inset-bs",
+				"inset-be",
+				"start",
+				"end",
+				"top",
+				"right",
+				"bottom",
+				"left",
+			},
+			"inset-x":   {"right", "left"},
+			"inset-y":   {"top", "bottom"},
+			"flex":      {"basis", "grow", "shrink"},
+			"gap":       {"gap-x", "gap-y"},
+			"p":         {"px", "py", "ps", "pe", "pbs", "pbe", "pt", "pr", "pb", "pl"},
+			"px":        {"pr", "pl"},
+			"py":        {"pt", "pb"},
+			"m":         {"mx", "my", "ms", "me", "mbs", "mbe", "mt", "mr", "mb", "ml"},
+			"mx":        {"mr", "ml"},
+			"my":        {"mt", "mb"},
+			"size":      {"w", "h"},
+			"font-size": {"leading"},
+			"fvn-normal": {
+				"fvn-ordinal",
+				"fvn-slashed-zero",
+				"fvn-figure",
+				"fvn-spacing",
+				"fvn-fraction",
+			},
 			"fvn-ordinal":      {"fvn-normal"},
 			"fvn-slashed-zero": {"fvn-normal"},
 			"fvn-figure":       {"fvn-normal"},
 			"fvn-spacing":      {"fvn-normal"},
 			"fvn-fraction":     {"fvn-normal"},
 			"line-clamp":       {"display", "overflow"},
-			"rounded":          {"rounded-s", "rounded-e", "rounded-t", "rounded-r", "rounded-b", "rounded-l", "rounded-ss", "rounded-se", "rounded-ee", "rounded-es", "rounded-tl", "rounded-tr", "rounded-br", "rounded-bl"},
-			"rounded-s":        {"rounded-ss", "rounded-es"},
-			"rounded-e":        {"rounded-se", "rounded-ee"},
-			"rounded-t":        {"rounded-tl", "rounded-tr"},
-			"rounded-r":        {"rounded-tr", "rounded-br"},
-			"rounded-b":        {"rounded-br", "rounded-bl"},
-			"rounded-l":        {"rounded-tl", "rounded-bl"},
-			"border-spacing":   {"border-spacing-x", "border-spacing-y"},
-			"border-w":         {"border-w-s", "border-w-e", "border-w-t", "border-w-r", "border-w-b", "border-w-l"},
-			"border-w-x":       {"border-w-r", "border-w-l"},
-			"border-w-y":       {"border-w-t", "border-w-b"},
-			"border-color":     {"border-color-t", "border-color-r", "border-color-b", "border-color-l"},
-			"border-color-x":   {"border-color-r", "border-color-l"},
-			"border-color-y":   {"border-color-t", "border-color-b"},
-			"scroll-m":         {"scroll-mx", "scroll-my", "scroll-ms", "scroll-me", "scroll-mt", "scroll-mr", "scroll-mb", "scroll-ml"},
-			"scroll-mx":        {"scroll-mr", "scroll-ml"},
-			"scroll-my":        {"scroll-mt", "scroll-mb"},
-			"scroll-p":         {"scroll-px", "scroll-py", "scroll-ps", "scroll-pe", "scroll-pt", "scroll-pr", "scroll-pb", "scroll-pl"},
-			"scroll-px":        {"scroll-pr", "scroll-pl"},
-			"scroll-py":        {"scroll-pt", "scroll-pb"},
-			"touch":            {"touch-x", "touch-y", "touch-pz"},
-			"touch-x":          {"touch"},
-			"touch-y":          {"touch"},
-			"touch-pz":         {"touch"},
-		},
-		ClassGroups: ClassPart{
-			NextPart: map[string]ClassPart{
-				/**
-				 * Aspect Ratio
-				 * @see https://tailwindcss.com/docs/aspect-ratio
-				 */
-				"aspect": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "aspect",
-						},
-						"square": ClassPart{
-							ClassGroupId: "aspect",
-						},
-						"video": ClassPart{
-							ClassGroupId: "aspect",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "aspect",
-						},
-					},
-				},
-				/**
-				 * Container
-				 * @see https://tailwindcss.com/docs/container
-				 */
-				"container": ClassPart{
-					NextPart:     map[string]ClassPart{},
-					ClassGroupId: "container",
-				},
-
-				/**
-				 * Columns
-				 * @see https://tailwindcss.com/docs/columns
-				 */
-				"columns": ClassPart{
-					NextPart: map[string]ClassPart{},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsTshirtSize,
-							ClassGroupId: "columns",
-						},
-					},
-				},
-
-				"break": ClassPart{
-					NextPart: map[string]ClassPart{
-
-						/**
-						 * Break After
-						 * @see https://tailwindcss.com/docs/break-after
-						 */
-						"after": ClassPart{
-							NextPart: getBreaks("break-after"),
-						},
-
-						/** Break Before @see https://tailwindcss.com/docs/break-before
-						 */
-						"before": ClassPart{
-							NextPart: getBreaks("break-before"),
-						},
-
-						/**
-						 * Break Inside
-						 * @see https://tailwindcss.com/docs/break-inside
-						 */
-						"inside": ClassPart{
-							NextPart: map[string]ClassPart{
-								"auto": ClassPart{
-									ClassGroupId: "break-inside",
-								},
-								"avoid": ClassPart{
-									NextPart: map[string]ClassPart{
-										"page": ClassPart{
-											ClassGroupId: "break-inside",
-										},
-										"column": ClassPart{
-											ClassGroupId: "break-inside",
-										},
-									},
-									ClassGroupId: "break-inside",
-								},
-							},
-						},
-
-						/**
-						 * Word Break
-						 * @see https://tailwindcss.com/docs/word-break
-						 */
-
-						"normal": ClassPart{
-							ClassGroupId: "break",
-						},
-						"words": ClassPart{
-							ClassGroupId: "break",
-						},
-						"all": ClassPart{
-							ClassGroupId: "break",
-						},
-						"keep": ClassPart{
-							ClassGroupId: "break",
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-
-				"box": ClassPart{
-					NextPart: map[string]ClassPart{
-						/**
-						 * Box Sizing
-						 * @see https://tailwindcss.com/docs/box-sizing
-						 */
-
-						"border": ClassPart{
-							ClassGroupId: "box",
-						},
-						"content": ClassPart{
-							ClassGroupId: "box",
-						},
-
-						/**
-						 * Box Decoration Break
-						 * @see https://tailwindcss.com/docs/box-decoration-break
-						 */
-
-						"decoration": ClassPart{
-							NextPart: map[string]ClassPart{
-								"slice": ClassPart{
-									ClassGroupId: "box-decoration"},
-								"clone": ClassPart{
-									ClassGroupId: "box-decoration",
-								},
-							},
-						},
-					},
-				},
-
-				/**
-				 * Display
-				 * @see https://tailwindcss.com/docs/display
-				 */
-
-				"block": {
-					ClassGroupId: "display",
-				},
-				"inline": {
-					NextPart: map[string]ClassPart{
-						"block": {ClassGroupId: "display"},
-						"flex":  {ClassGroupId: "display"},
-						"grid":  {ClassGroupId: "display"},
-						"table": {ClassGroupId: "display"},
-					},
-					ClassGroupId: "display",
-				},
-				"flex": {
-					NextPart: map[string]ClassPart{
-						"row": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									ClassGroupId: "flex-direction",
-								},
-							},
-							ClassGroupId: "flex-direction",
-						},
-						"col": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									ClassGroupId: "flex-direction",
-								},
-							},
-							ClassGroupId: "flex-direction",
-						},
-						"wrap": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									ClassGroupId: "flex-wrap",
-								},
-							},
-							ClassGroupId: "flex-wrap",
-						},
-						"nowrap": {
-							ClassGroupId: "flex-wrap",
-						},
-						"1": {
-							ClassGroupId: "flex",
-						},
-						"auto": {
-							ClassGroupId: "flex",
-						},
-						"initial": {
-							ClassGroupId: "flex",
-						},
-						"none": {
-							ClassGroupId: "flex",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "flex",
-						},
-					},
-					ClassGroupId: "display",
-				},
-				"table": {
-					NextPart: map[string]ClassPart{
-						"caption": {
-							ClassGroupId: "display",
-						},
-						"cell": {
-							ClassGroupId: "display",
-						},
-						"column": {
-							NextPart: map[string]ClassPart{
-								"group": {
-									ClassGroupId: "display",
-								},
-							},
-							ClassGroupId: "display",
-						},
-						"footer": {
-							NextPart: map[string]ClassPart{
-								"group": {
-									ClassGroupId: "display",
-								},
-							},
-						},
-						"header": {
-							NextPart: map[string]ClassPart{
-								"group": {
-									ClassGroupId: "display",
-								},
-							},
-						},
-						"row": {
-							NextPart: map[string]ClassPart{
-								"group": {
-									ClassGroupId: "display",
-								},
-							},
-							ClassGroupId: "display",
-						},
-						"auto": {
-							ClassGroupId: "table-layout",
-						},
-						"fixed": {
-							ClassGroupId: "table-layout",
-						},
-					},
-					ClassGroupId: "display",
-				},
-				"flow": {
-					NextPart: map[string]ClassPart{"root": {ClassGroupId: "display"}},
-				},
-				"grid": ClassPart{
-					NextPart: map[string]ClassPart{
-						"cols": {
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsAny,
-									ClassGroupId: "grid-cols",
-								},
-							},
-						},
-						"rows": {
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsAny,
-									ClassGroupId: "grid-rows",
-								},
-							},
-						},
-						"flow": {
-							NextPart: map[string]ClassPart{
-								"row": {
-									NextPart: map[string]ClassPart{
-										"dense": {
-											ClassGroupId: "grid-flow",
-										},
-									},
-									ClassGroupId: "grid-flow",
-								},
-								"col": {
-									NextPart: map[string]ClassPart{
-										"dense": {
-											ClassGroupId: "grid-flow",
-										},
-									},
-									ClassGroupId: "grid-flow",
-								},
-								"dense": {
-									ClassGroupId: "grid-flow",
-								},
-							},
-						},
-					},
-					Validators:   []ClassGroupValidator{},
-					ClassGroupId: "display",
-				},
-				"contents": {ClassGroupId: "display"},
-				"list": ClassPart{
-					NextPart: map[string]ClassPart{
-						"item": {
-							ClassGroupId: "display",
-						},
-						"image": {
-							NextPart: map[string]ClassPart{
-								"none": {
-									ClassGroupId: "list-image",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "list-image",
-								},
-							},
-						},
-						"none": {
-							ClassGroupId: "list-style-type",
-						},
-						"disc": {
-							ClassGroupId: "list-style-type",
-						},
-						"decimal": {
-							ClassGroupId: "list-style-type",
-						},
-						"inside": {
-							ClassGroupId: "list-style-position",
-						},
-						"outside": {
-							ClassGroupId: "list-style-position",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							// fn : TODO: You need to provide the function implementation here
-							ClassGroupId: "list-style-type",
-						},
-					},
-				},
-				"hidden": {ClassGroupId: "display"},
-				"float": ClassPart{
-					NextPart: map[string]ClassPart{
-						"right": {
-							ClassGroupId: "float",
-						},
-						"left": {
-							ClassGroupId: "float",
-						},
-						"none": {
-							ClassGroupId: "float",
-						},
-						"start": {
-							ClassGroupId: "float",
-						},
-						"end": {
-							ClassGroupId: "float",
-						},
-					},
-				},
-				"clear": ClassPart{
-					NextPart: map[string]ClassPart{
-						"left": {
-							ClassGroupId: "clear",
-						},
-						"right": {
-							ClassGroupId: "clear",
-						},
-						"both": {
-							ClassGroupId: "clear",
-						},
-						"none": {
-							ClassGroupId: "clear",
-						},
-						"start": {
-							ClassGroupId: "clear",
-						},
-						"end": {
-							ClassGroupId: "clear",
-						},
-					},
-				},
-				"isolate": {ClassGroupId: "isolation"},
-				"isolation": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "isolation",
-						},
-					},
-				},
-				"object": ClassPart{
-					NextPart: map[string]ClassPart{
-						"contain": {
-							ClassGroupId: "object-fit",
-						},
-						"cover": {
-							ClassGroupId: "object-fit",
-						},
-						"fill": {
-							ClassGroupId: "object-fit",
-						},
-						"none": {
-							ClassGroupId: "object-fit",
-						},
-						"scale": {
-							NextPart: map[string]ClassPart{
-								"down": {
-									ClassGroupId: "object-fit",
-								},
-							},
-						},
-						"bottom": {
-							ClassGroupId: "object-position",
-						},
-						"center": {
-							ClassGroupId: "object-position",
-						},
-						"left": {
-							NextPart: map[string]ClassPart{
-								"bottom": {
-									ClassGroupId: "object-position",
-								},
-								"top": {
-									ClassGroupId: "object-position",
-								},
-							},
-						},
-						"right": {
-							NextPart: map[string]ClassPart{
-								"bottom": {
-									ClassGroupId: "object-position",
-								},
-								"top": {
-									ClassGroupId: "object-position",
-								},
-							},
-						},
-						"top": {
-							ClassGroupId: "object-position",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "object-position",
-						},
-					},
-				},
-
-				"overflow": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "overflow",
-						},
-						"hidden": {
-							ClassGroupId: "overflow",
-						},
-						"clip": {
-							ClassGroupId: "overflow",
-						},
-						"visible": {
-							ClassGroupId: "overflow",
-						},
-						"scroll": {
-							ClassGroupId: "overflow",
-						},
-						"x": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									ClassGroupId: "overflow-x",
-								},
-								"hidden": {
-									ClassGroupId: "overflow-x",
-								},
-								"clip": {
-									ClassGroupId: "overflow-x",
-								},
-								"visible": {
-									ClassGroupId: "overflow-x",
-								},
-								"scroll": {
-									ClassGroupId: "overflow-x",
-								},
-							},
-						},
-						"y": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									ClassGroupId: "overflow-y",
-								},
-								"hidden": {
-									ClassGroupId: "overflow-y",
-								},
-								"clip": {
-									ClassGroupId: "overflow-y",
-								},
-								"visible": {
-									ClassGroupId: "overflow-y",
-								},
-								"scroll": {
-									ClassGroupId: "overflow-y",
-								},
-							},
-						},
-					},
-				},
-				"overscroll": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "overscroll",
-						},
-						"contain": {
-							ClassGroupId: "overscroll",
-						},
-						"none": {
-							ClassGroupId: "overscroll",
-						},
-						"x": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									ClassGroupId: "overscroll-x",
-								},
-								"contain": {
-									ClassGroupId: "overscroll-x",
-								},
-								"none": {
-									ClassGroupId: "overscroll-x",
-								},
-							},
-						},
-						"y": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									ClassGroupId: "overscroll-y",
-								},
-								"contain": {
-									ClassGroupId: "overscroll-y",
-								},
-								"none": {
-									ClassGroupId: "overscroll-y",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-
-				"static": ClassPart{
-					ClassGroupId: "position",
-				},
-				"fixed": ClassPart{
-					ClassGroupId: "position",
-				},
-				"absolute": ClassPart{
-					ClassGroupId: "position",
-				},
-				"relative": ClassPart{
-					ClassGroupId: "position",
-				},
-				"sticky": ClassPart{
-					ClassGroupId: "position",
-				},
-
-				"inset": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "inset",
-						},
-						"x": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									ClassGroupId: "inset-x",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "inset-x",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "inset-x",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "inset-x",
-								},
-							},
-						},
-						"y": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									ClassGroupId: "inset-y",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "inset-y",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "inset-y",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "inset-y",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "inset",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "inset",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "inset",
-						},
-					},
-				},
-				"start": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "start",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "start",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "start",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "start",
-						},
-					},
-				},
-				"end": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "end",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "end",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "end",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "end",
-						},
-					},
-				},
-				"top": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "top",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "top",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "top",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "top",
-						},
-					},
-				},
-				"right": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "right",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "right",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "right",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "right",
-						},
-					},
-				},
-				"bottom": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "bottom",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "bottom",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "bottom",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "bottom",
-						},
-					},
-				},
-				"left": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "left",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "left",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "left",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "left",
-						},
-					},
-				},
-				"visible": ClassPart{
-					ClassGroupId: "visibility",
-				},
-				"invisible": ClassPart{
-					ClassGroupId: "visibility",
-				},
-				"collapse": ClassPart{
-					ClassGroupId: "visibility",
-				},
-				"z": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "z",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsInteger,
-							ClassGroupId: "z",
-						},
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "z",
-						},
-					},
-				},
-				"basis": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							ClassGroupId: "basis",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "basis",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "basis",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "basis",
-						},
-					},
-				},
-				"grow": ClassPart{
-					NextPart: map[string]ClassPart{
-						"0": {
-							ClassGroupId: "grow",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "grow",
-						},
-					},
-					ClassGroupId: "grow",
-				},
-				"shrink": ClassPart{
-					NextPart: map[string]ClassPart{
-						"0": {
-							ClassGroupId: "shrink",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "shrink",
-						},
-					},
-					ClassGroupId: "shrink",
-				},
-				"order": ClassPart{
-					NextPart: map[string]ClassPart{
-						"first": {
-							ClassGroupId: "order",
-						},
-						"last": {
-							ClassGroupId: "order",
-						},
-						"none": {
-							ClassGroupId: "order",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsInteger,
-							ClassGroupId: "order",
-						},
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "order",
-						},
-					},
-				},
-				"col": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							NextPart:     map[string]ClassPart{},
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "col-start-end",
-						},
-						"span": {
-							NextPart: map[string]ClassPart{
-								"full": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "col-start-end",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsInteger,
-									ClassGroupId: "col-start-end",
-								},
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "col-start-end",
-								},
-							},
-						},
-						"start": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "col-start",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsNumber,
-									ClassGroupId: "col-start",
-								},
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "col-start",
-								},
-							},
-						},
-						"end": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "col-end",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsNumber,
-									ClassGroupId: "col-end",
-								},
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "col-end",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "col-start-end",
-						},
-					},
-				},
-				"row": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": {
-							NextPart:     map[string]ClassPart{},
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "row-start-end",
-						},
-						"span": {
-							NextPart: map[string]ClassPart{},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsInteger,
-									ClassGroupId: "row-start-end",
-								},
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "row-start-end",
-								},
-							},
-						},
-						"start": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "row-start",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsNumber,
-									ClassGroupId: "row-start",
-								},
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "row-start",
-								},
-							},
-						},
-						"end": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "row-end",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsNumber,
-									ClassGroupId: "row-end",
-								},
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "row-end",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "row-start-end",
-						},
-					},
-				},
-				"auto": ClassPart{
-					NextPart: map[string]ClassPart{
-						"cols": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-cols",
-								},
-								"min": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-cols",
-								},
-								"max": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-cols",
-								},
-								"fr": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-cols",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "auto-cols",
-								},
-							},
-						},
-						"rows": {
-							NextPart: map[string]ClassPart{
-								"auto": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-rows",
-								},
-								"min": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-rows",
-								},
-								"max": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-rows",
-								},
-								"fr": {
-									NextPart:     map[string]ClassPart{},
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "auto-rows",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "auto-rows",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-				"gap": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": {
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "gap-x",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "gap-x",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "gap-x",
-								},
-							},
-						},
-						"y": {
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "gap-y",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "gap-y",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "gap-y",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "gap",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "gap",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "gap",
-						},
-					},
-				},
-				"justify": ClassPart{
-					NextPart: map[string]ClassPart{
-						"normal": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"start": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"end": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"center": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"between": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"around": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"evenly": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"stretch": ClassPart{
-							ClassGroupId: "justify-content",
-						},
-						"items": ClassPart{
-							NextPart: map[string]ClassPart{
-								"start": ClassPart{
-									ClassGroupId: "justify-items",
-								},
-								"end": ClassPart{
-									ClassGroupId: "justify-items",
-								},
-								"center": ClassPart{
-									ClassGroupId: "justify-items",
-								},
-								"stretch": ClassPart{
-									ClassGroupId: "justify-items",
-								},
-							},
-						},
-						"self": ClassPart{
-							NextPart: map[string]ClassPart{
-								"auto": ClassPart{
-									ClassGroupId: "justify-self",
-								},
-								"start": ClassPart{
-									ClassGroupId: "justify-self",
-								},
-								"end": ClassPart{
-									ClassGroupId: "justify-self",
-								},
-								"center": ClassPart{
-									ClassGroupId: "justify-self",
-								},
-								"stretch": ClassPart{
-									ClassGroupId: "justify-self",
-								},
-							},
-						},
-					},
-				},
-				"content": ClassPart{
-					NextPart: map[string]ClassPart{
-						"normal": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"start": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"end": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"center": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"between": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"around": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"evenly": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"stretch": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"baseline": ClassPart{
-							ClassGroupId: "align-content",
-						},
-						"none": ClassPart{
-							ClassGroupId: "content",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "content",
-						},
-					},
-				},
-				"items": ClassPart{
-					NextPart: map[string]ClassPart{
-						"start": ClassPart{
-							ClassGroupId: "align-items",
-						},
-						"end": ClassPart{
-							ClassGroupId: "align-items",
-						},
-						"center": ClassPart{
-							ClassGroupId: "align-items",
-						},
-						"baseline": ClassPart{
-							ClassGroupId: "align-items",
-						},
-						"stretch": ClassPart{
-							ClassGroupId: "align-items",
-						},
-					},
-				},
-				"self": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "align-self",
-						},
-						"start": ClassPart{
-							ClassGroupId: "align-self",
-						},
-						"end": ClassPart{
-							ClassGroupId: "align-self",
-						},
-						"center": ClassPart{
-							ClassGroupId: "align-self",
-						},
-						"stretch": ClassPart{
-							ClassGroupId: "align-self",
-						},
-						"baseline": ClassPart{
-							ClassGroupId: "align-self",
-						},
-					},
-				},
-				"place": ClassPart{
-					NextPart: map[string]ClassPart{
-						"content": ClassPart{
-							NextPart: map[string]ClassPart{
-								"start": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"end": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"center": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"between": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"around": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"evenly": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"stretch": ClassPart{
-									ClassGroupId: "place-content",
-								},
-								"baseline": ClassPart{
-									ClassGroupId: "place-content",
-								},
-							},
-						},
-						"items": ClassPart{
-							NextPart: map[string]ClassPart{
-								"start": ClassPart{
-									ClassGroupId: "place-items",
-								},
-								"end": ClassPart{
-									ClassGroupId: "place-items",
-								},
-								"center": ClassPart{
-									ClassGroupId: "place-items",
-								},
-								"baseline": ClassPart{
-									ClassGroupId: "place-items",
-								},
-								"stretch": ClassPart{
-									ClassGroupId: "place-items",
-								},
-							},
-						},
-						"self": ClassPart{
-							NextPart: map[string]ClassPart{
-								"auto": ClassPart{
-									ClassGroupId: "place-self",
-								},
-								"start": ClassPart{
-									ClassGroupId: "place-self",
-								},
-								"end": ClassPart{
-									ClassGroupId: "place-self",
-								},
-								"center": ClassPart{
-									ClassGroupId: "place-self",
-								},
-								"stretch": ClassPart{
-									ClassGroupId: "place-self",
-								},
-							},
-						},
-					},
-				},
-				"p": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "p",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "p",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "p",
-						},
-					},
-				},
-				"px": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "px",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "px",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "px",
-						},
-					},
-				},
-				"py": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "py",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "py",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "py",
-						},
-					},
-				},
-				"ps": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "ps",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "ps",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "ps",
-						},
-					},
-				},
-				"pe": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "pe",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "pe",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "pe",
-						},
-					},
-				},
-				"pt": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "pt",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "pt",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "pt",
-						},
-					},
-				},
-				"pr": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "pr",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "pr",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "pr",
-						},
-					},
-				},
-				"pb": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "pb",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "pb",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "pb",
-						},
-					},
-				},
-				"pl": ClassPart{
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "pl",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "pl",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "pl",
-						},
-					},
-				},
-				"m": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "m",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "m",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "m",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "m",
-						},
-					},
-				},
-				"mx": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "mx",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "mx",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "mx",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "mx",
-						},
-					},
-				},
-				"my": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "my",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "my",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "my",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "my",
-						},
-					},
-				},
-				"ms": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "ms",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "ms",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "ms",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "ms",
-						},
-					},
-				},
-				"me": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "me",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "me",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "me",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "me",
-						},
-					},
-				},
-				"mt": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "mt",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "mt",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "mt",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "mt",
-						},
-					},
-				},
-				"mr": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "mr",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "mr",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "mr",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "mr",
-						},
-					},
-				},
-				"mb": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "mb",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "mb",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "mb",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "mb",
-						},
-					},
-				},
-				"ml": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "ml",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "ml",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "ml",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "ml",
-						},
-					},
-				},
-				"space": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									Validators:   []ClassGroupValidator{},
-									ClassGroupId: "space-x-reverse",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "space-x",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "space-x",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "space-x",
-								},
-							},
-						},
-						"y": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									ClassGroupId: "space-y-reverse",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "space-y",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "space-y",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "space-y",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-				"w": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "w",
-						},
-						"min": ClassPart{
-							ClassGroupId: "w",
-						},
-						"max": ClassPart{
-							ClassGroupId: "w",
-						},
-						"fit": ClassPart{
-							ClassGroupId: "w",
-						},
-						"svw": ClassPart{
-							ClassGroupId: "w",
-						},
-						"lvw": ClassPart{
-							ClassGroupId: "w",
-						},
-						"dvw": ClassPart{
-							ClassGroupId: "w",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "w",
-						},
-						{
-							Fn:           IsLength,
-							ClassGroupId: "w",
-						},
-						{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "w",
-						},
-					},
-				},
-				"min": ClassPart{
-					NextPart: map[string]ClassPart{
-						"w": ClassPart{
-							NextPart: map[string]ClassPart{
-								"min": ClassPart{
-									ClassGroupId: "min-w",
-								},
-								"max": ClassPart{
-									ClassGroupId: "min-w",
-								},
-								"fit": ClassPart{
-									ClassGroupId: "min-w",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "min-w",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "min-w",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "min-w",
-								},
-							},
-						},
-						"h": ClassPart{
-							NextPart: map[string]ClassPart{
-								"min": ClassPart{
-									ClassGroupId: "min-h",
-								},
-								"max": ClassPart{
-									ClassGroupId: "min-h",
-								},
-								"fit": ClassPart{
-									ClassGroupId: "min-h",
-								},
-								"svh": ClassPart{
-									ClassGroupId: "min-h",
-								},
-								"lvh": ClassPart{
-									ClassGroupId: "min-h",
-								},
-								"dvh": ClassPart{
-									ClassGroupId: "min-h",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "min-h",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "min-h",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "min-h",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-				"max": ClassPart{
-					NextPart: map[string]ClassPart{
-						"w": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "max-w",
-								},
-								"full": ClassPart{
-									ClassGroupId: "max-w",
-								},
-								"min": ClassPart{
-									ClassGroupId: "max-w",
-								},
-								"max": ClassPart{
-									ClassGroupId: "max-w",
-								},
-								"fit": ClassPart{
-									ClassGroupId: "max-w",
-								},
-								"prose": ClassPart{
-									ClassGroupId: "max-w",
-								},
-								"screen": ClassPart{
-									Validators: []ClassGroupValidator{
-										ClassGroupValidator{
-											Fn:           IsTshirtSize,
-											ClassGroupId: "max-w",
-										},
-									},
-									ClassGroupId: "max-w",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "max-w",
-								},
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "max-w",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "max-w",
-								},
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "max-w",
-								},
-							},
-							ClassGroupId: "max-w",
-						},
-						"h": ClassPart{
-							NextPart: map[string]ClassPart{
-								"min": ClassPart{
-									ClassGroupId: "max-h",
-								},
-								"max": ClassPart{
-									ClassGroupId: "max-h",
-								},
-								"fit": ClassPart{
-									ClassGroupId: "max-h",
-								},
-								"svh": ClassPart{
-									ClassGroupId: "max-h",
-								},
-								"lvh": ClassPart{
-									ClassGroupId: "max-h",
-								},
-								"dvh": ClassPart{
-									ClassGroupId: "max-h",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "max-h",
-								},
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "max-h",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "max-h",
-								},
-							},
-							ClassGroupId: "max-h",
-						},
-					},
-				},
-				"h": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "h",
-						},
-						"min": ClassPart{
-							ClassGroupId: "h",
-						},
-						"max": ClassPart{
-							ClassGroupId: "h",
-						},
-						"fit": ClassPart{
-							ClassGroupId: "h",
-						},
-						"svh": ClassPart{
-							ClassGroupId: "h",
-						},
-						"lvh": ClassPart{
-							ClassGroupId: "h",
-						},
-						"dvh": ClassPart{
-							ClassGroupId: "h",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "h",
-						},
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "h",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "h",
-						},
-					},
-					ClassGroupId: "h",
-				},
-				"size": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "size",
-						},
-						"min": ClassPart{
-							ClassGroupId: "size",
-						},
-						"max": ClassPart{
-							ClassGroupId: "size",
-						},
-						"fit": ClassPart{
-							ClassGroupId: "size",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "size",
-						},
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "size",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "size",
-						},
-					},
-					ClassGroupId: "size",
-				},
-				"text": ClassPart{
-					NextPart: map[string]ClassPart{
-						"base": ClassPart{
-							ClassGroupId: "font-size",
-						},
-						"left": ClassPart{
-							ClassGroupId: "text-alignment",
-						},
-						"center": ClassPart{
-							ClassGroupId: "text-alignment",
-						},
-						"right": ClassPart{
-							ClassGroupId: "text-alignment",
-						},
-						"justify": ClassPart{
-							ClassGroupId: "text-alignment",
-						},
-						"start": ClassPart{
-							ClassGroupId: "text-alignment",
-						},
-						"end": ClassPart{
-							ClassGroupId: "text-alignment",
-						},
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "text-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "text-opacity",
-								},
-							},
-							ClassGroupId: "text-opacity",
-						},
-						"ellipsis": ClassPart{
-							ClassGroupId: "text-overflow",
-						},
-						"clip": ClassPart{
-							ClassGroupId: "text-overflow",
-						},
-						"wrap": ClassPart{
-							ClassGroupId: "text-wrap",
-						},
-						"nowrap": ClassPart{
-							ClassGroupId: "text-wrap",
-						},
-						"balance": ClassPart{
-							ClassGroupId: "text-wrap",
-						},
-						"pretty": ClassPart{
-							ClassGroupId: "text-wrap",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsTshirtSize,
-							ClassGroupId: "font-size",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "font-size",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "text-color",
-						},
-					},
-				},
-				"antialiased": ClassPart{
-					ClassGroupId: "font-smoothing",
-				},
-				"subpixel": ClassPart{
-					NextPart: map[string]ClassPart{
-						"antialiased": ClassPart{
-							ClassGroupId: "font-smoothing",
-						},
-					},
-				},
-				"italic": ClassPart{
-					ClassGroupId: "font-style",
-				},
-				"not": ClassPart{
-					NextPart: map[string]ClassPart{
-						"italic": ClassPart{
-							ClassGroupId: "font-style",
-						},
-						"sr": ClassPart{
-							NextPart: map[string]ClassPart{
-								"only": ClassPart{
-									ClassGroupId: "sr",
-								},
-							},
-						},
-					},
-				},
-				"font": ClassPart{
-					NextPart: map[string]ClassPart{
-						"thin": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"extralight": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"light": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"normal": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"medium": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"semibold": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"bold": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"extrabold": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-						"black": ClassPart{
-							ClassGroupId: "font-weight",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "font-weight",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "font-family",
-						},
-					},
-				},
-				"normal": ClassPart{
-					NextPart: map[string]ClassPart{
-						"nums": ClassPart{
-							ClassGroupId: "fvn-normal",
-						},
-						"case": ClassPart{
-							ClassGroupId: "text-transform",
-						},
-					},
-				},
-				"ordinal": ClassPart{
-					ClassGroupId: "fvn-ordinal",
-				},
-				"slashed": ClassPart{
-					NextPart: map[string]ClassPart{
-						"zero": ClassPart{
-							ClassGroupId: "fvn-slashed-zero",
-						},
-					},
-				},
-				"lining": ClassPart{
-					NextPart: map[string]ClassPart{
-						"nums": ClassPart{
-							ClassGroupId: "fvn-figure",
-						},
-					},
-				},
-				"oldstyle": ClassPart{
-					NextPart: map[string]ClassPart{
-						"nums": ClassPart{
-							ClassGroupId: "fvn-figure",
-						},
-					},
-				},
-				"proportional": ClassPart{
-					NextPart: map[string]ClassPart{
-						"nums": ClassPart{
-							ClassGroupId: "fvn-spacing",
-						},
-					},
-				},
-				"tabular": ClassPart{
-					NextPart: map[string]ClassPart{
-						"nums": ClassPart{
-							ClassGroupId: "fvn-spacing",
-						},
-					},
-				},
-				"diagonal": ClassPart{
-					NextPart: map[string]ClassPart{
-						"fractions": ClassPart{
-							ClassGroupId: "fvn-fraction",
-						},
-					},
-				},
-				"stacked": ClassPart{
-					NextPart: map[string]ClassPart{
-						"fractons": ClassPart{
-							ClassGroupId: "fvn-fraction",
-						},
-					},
-				},
-				"tracking": ClassPart{
-					NextPart: map[string]ClassPart{
-						"tighter": ClassPart{
-							ClassGroupId: "tracking",
-						},
-						"tight": ClassPart{
-							ClassGroupId: "tracking",
-						},
-						"normal": ClassPart{
-							ClassGroupId: "tracking",
-						},
-						"wide": ClassPart{
-							ClassGroupId: "tracking",
-						},
-						"wider": ClassPart{
-							ClassGroupId: "tracking",
-						},
-						"widest": ClassPart{
-							ClassGroupId: "tracking",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "tracking",
-						},
-					},
-				},
-				"line": ClassPart{
-					NextPart: map[string]ClassPart{
-						"clamp": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "line-clamp",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "line-clamp",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "line-clamp",
-								},
-							},
-						},
-						"through": ClassPart{
-							ClassGroupId: "text-decoration",
-						},
-					},
-				},
-				"leading": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "leading",
-						},
-						"tight": ClassPart{
-							ClassGroupId: "leading",
-						},
-						"snug": ClassPart{
-							ClassGroupId: "leading",
-						},
-						"normal": ClassPart{
-							ClassGroupId: "leading",
-						},
-						"relaxed": ClassPart{
-							ClassGroupId: "leading",
-						},
-						"loose": ClassPart{
-							ClassGroupId: "leading",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "leading",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "leading",
-						},
-					},
-				},
-				"placeholder": ClassPart{
-					NextPart: map[string]ClassPart{
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "placeholder-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "placeholder-opacity",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "placeholder-color",
-						},
-					},
-				},
-				"underline": ClassPart{
-					NextPart: map[string]ClassPart{
-						"offset": ClassPart{
-							NextPart: map[string]ClassPart{
-								"auto": ClassPart{
-									ClassGroupId: "underline-offset",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "underline-offset",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "underline-offset",
-								},
-							},
-						},
-					},
-					ClassGroupId: "text-decoration",
-				},
-				"overline": ClassPart{
-					ClassGroupId: "text-decoration",
-				},
-				"no": ClassPart{
-					NextPart: map[string]ClassPart{
-						"underline": ClassPart{
-							ClassGroupId: "text-decoration",
-						},
-					},
-				},
-				"decoration": ClassPart{
-					NextPart: map[string]ClassPart{
-						"solid": ClassPart{
-							ClassGroupId: "text-decoration-style",
-						},
-						"dashed": ClassPart{
-							ClassGroupId: "text-decoration-style",
-						},
-						"dotted": ClassPart{
-							ClassGroupId: "text-decoration-style",
-						},
-						"double": ClassPart{
-							ClassGroupId: "text-decoration-style",
-						},
-						"none": ClassPart{
-							ClassGroupId: "text-decoration-style",
-						},
-						"wavy": ClassPart{
-							ClassGroupId: "text-decoration-style",
-						},
-						"auto": ClassPart{
-							ClassGroupId: "text-decoration-thickness",
-						},
-						"from": ClassPart{
-							NextPart: map[string]ClassPart{
-								"font": ClassPart{
-									ClassGroupId: "text-decoration-thickness",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "text-decoration-thickness",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "text-decoration-thickness",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "text-decoration-color",
-						},
-					},
-					ClassGroupId: "",
-				},
-				"uppercase": ClassPart{
-					ClassGroupId: "text-transform",
-				},
-				"lowercase": ClassPart{
-					ClassGroupId: "text-transform",
-				},
-				"capitalize": ClassPart{
-					ClassGroupId: "text-transform",
-				},
-				"truncate": ClassPart{
-					ClassGroupId: "text-overflow",
-				},
-				"indent": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "indent",
-						},
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "indent",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "indent",
-						},
-					},
-				},
-				"align": ClassPart{
-					NextPart: map[string]ClassPart{
-						"baseline": ClassPart{
-							ClassGroupId: "vertical-align",
-						},
-						"top": ClassPart{
-							ClassGroupId: "vertical-align",
-						},
-						"middle": ClassPart{
-							ClassGroupId: "vertical-align",
-						},
-						"bottom": ClassPart{
-							ClassGroupId: "vertical-align",
-						},
-						"text": ClassPart{
-							NextPart: map[string]ClassPart{
-								"top": ClassPart{
-									ClassGroupId: "vertical-align",
-								},
-								"bottom": ClassPart{
-									ClassGroupId: "vertical-align",
-								},
-							},
-						},
-						"sub": ClassPart{
-							ClassGroupId: "vertical-align",
-						},
-						"super": ClassPart{
-							ClassGroupId: "vertical-align",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "vertical-align",
-						},
-					},
-				},
-				"whitespace": ClassPart{
-					NextPart: map[string]ClassPart{
-						"normal": ClassPart{
-							ClassGroupId: "whitespace",
-						},
-						"nowrap": ClassPart{
-							ClassGroupId: "whitespace",
-						},
-						"pre": ClassPart{
-							NextPart: map[string]ClassPart{
-								"line": ClassPart{
-									ClassGroupId: "whitespace",
-								},
-								"wrap": ClassPart{
-									ClassGroupId: "whitespace",
-								},
-							},
-							ClassGroupId: "whitespace",
-						},
-						"break": ClassPart{
-							NextPart: map[string]ClassPart{
-								"spaces": ClassPart{
-									ClassGroupId: "whitespace",
-								},
-							},
-							ClassGroupId: "",
-						},
-					},
-				},
-				"hyphens": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "hyphens",
-						},
-						"manual": ClassPart{
-							ClassGroupId: "hyphens",
-						},
-						"auto": ClassPart{
-							ClassGroupId: "hyphens",
-						},
-					},
-				},
-				"bg": ClassPart{
-					NextPart: map[string]ClassPart{
-						"fixed": ClassPart{
-							ClassGroupId: "bg-attachment",
-						},
-						"local": ClassPart{
-							ClassGroupId: "bg-attachment",
-						},
-						"scroll": ClassPart{
-							ClassGroupId: "bg-attachment",
-						},
-						"clip": ClassPart{
-							NextPart: map[string]ClassPart{
-								"border": ClassPart{
-									ClassGroupId: "bg-clip",
-								},
-								"padding": ClassPart{
-									ClassGroupId: "bg-clip",
-								},
-								"content": ClassPart{
-									ClassGroupId: "bg-clip",
-								},
-								"text": ClassPart{
-									ClassGroupId: "bg-clip",
-								},
-							},
-						},
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "bg-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "bg-opacity",
-								},
-							},
-						},
-						"origin": ClassPart{
-							NextPart: map[string]ClassPart{
-								"border": ClassPart{
-									ClassGroupId: "bg-origin",
-								},
-								"padding": ClassPart{
-									ClassGroupId: "bg-origin",
-								},
-								"content": ClassPart{
-									ClassGroupId: "bg-origin",
-								},
-							},
-						},
-						"bottom": ClassPart{
-							ClassGroupId: "bg-position",
-						},
-						"center": ClassPart{
-							ClassGroupId: "bg-position",
-						},
-						"left": ClassPart{
-							NextPart: map[string]ClassPart{
-								"bottom": ClassPart{
-									ClassGroupId: "bg-position",
-								},
-								"top": ClassPart{
-									ClassGroupId: "bg-position",
-								},
-							},
-							ClassGroupId: "bg-position",
-						},
-						"right": ClassPart{
-							NextPart: map[string]ClassPart{
-								"bottom": ClassPart{
-									ClassGroupId: "bg-position",
-								},
-								"top": ClassPart{
-									ClassGroupId: "bg-position",
-								},
-							},
-							ClassGroupId: "bg-position",
-						},
-						"top": ClassPart{
-							ClassGroupId: "bg-position",
-						},
-						"no": ClassPart{
-							NextPart: map[string]ClassPart{
-								"repeat": ClassPart{
-									ClassGroupId: "bg-repeat",
-								},
-							},
-						},
-						"repeat": ClassPart{
-							NextPart: map[string]ClassPart{
-								"x": ClassPart{
-									ClassGroupId: "bg-repeat",
-								},
-								"y": ClassPart{
-									ClassGroupId: "bg-repeat",
-								},
-								"round": ClassPart{
-									ClassGroupId: "bg-repeat",
-								},
-								"space": ClassPart{
-									ClassGroupId: "bg-repeat",
-								},
-							},
-							ClassGroupId: "bg-repeat",
-						},
-						"auto": ClassPart{
-							ClassGroupId: "bg-size",
-						},
-						"cover": ClassPart{
-							ClassGroupId: "bg-size",
-						},
-						"contain": ClassPart{
-							ClassGroupId: "bg-size",
-						},
-						"none": ClassPart{
-							ClassGroupId: "bg-image",
-						},
-						"gradient": ClassPart{
-							NextPart: map[string]ClassPart{
-								"to": ClassPart{
-									NextPart: map[string]ClassPart{
-										"t": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"tr": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"r": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"br": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"b": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"bl": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"l": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-										"tl": ClassPart{
-											ClassGroupId: "bg-image",
-										},
-									},
-								},
-							},
-						},
-						"blend": ClassPart{
-							NextPart: map[string]ClassPart{
-								"normal": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"multiply": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"screen": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"overlay": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"darken": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"lighten": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"color": ClassPart{
-									NextPart: map[string]ClassPart{
-										"dodge": ClassPart{
-											ClassGroupId: "bg-blend",
-										},
-										"burn": ClassPart{
-											ClassGroupId: "bg-blend",
-										},
-									},
-								},
-								"hard": ClassPart{
-									NextPart: map[string]ClassPart{
-										"light": ClassPart{
-											ClassGroupId: "bg-blend",
-										},
-									},
-								},
-								"soft": ClassPart{
-									NextPart: map[string]ClassPart{
-										"light": ClassPart{
-											ClassGroupId: "bg-blend",
-										},
-									},
-								},
-								"difference": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"exclusion": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"hue": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"saturation": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"luminosity": ClassPart{
-									ClassGroupId: "bg-blend",
-								},
-								"plus": ClassPart{
-									NextPart: map[string]ClassPart{
-										"lighter": ClassPart{
-											ClassGroupId: "bg-blend",
-										},
-									},
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryPosition,
-							ClassGroupId: "bg-position",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitrarySize,
-							ClassGroupId: "bg-size",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryImage,
-							ClassGroupId: "bg-image",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "bg-color",
-						},
-					},
-				},
-				"from": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsPercent,
-							ClassGroupId: "gradient-from-pos",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "gradient-from-pos",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "gradient-from",
-						},
-					},
-				},
-				"via": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsPercent,
-							ClassGroupId: "gradient-via-pos",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "gradient-via-pos",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "gradient-via",
-						},
-					},
-				},
-				"to": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsPercent,
-							ClassGroupId: "gradient-to-pos",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "gradient-to-pos",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "gradient-to",
-						},
-					},
-				},
-				"rounded": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "rounded",
-						},
-						"full": ClassPart{
-							ClassGroupId: "rounded",
-						},
-						"s": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-s",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-s",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-s",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-s",
-								},
-							},
-							ClassGroupId: "rounded-s",
-						},
-						"e": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-e",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-e",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-e",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-e",
-								},
-							},
-							ClassGroupId: "rounded-e",
-						},
-						"t": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-t",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-t",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-t",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-t",
-								},
-							},
-							ClassGroupId: "rounded-t",
-						},
-						"r": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-r",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-r",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-r",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-r",
-								},
-							},
-							ClassGroupId: "rounded-r",
-						},
-						"b": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-b",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-b",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-b",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-b",
-								},
-							},
-							ClassGroupId: "rounded-b",
-						},
-						"l": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-l",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-l",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-l",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-l",
-								},
-							},
-							ClassGroupId: "rounded-l",
-						},
-						"ss": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-ss",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-ss",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-ss",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-ss",
-								},
-							},
-							ClassGroupId: "rounded-ss",
-						},
-						"se": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-se",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-se",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-se",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-se",
-								},
-							},
-							ClassGroupId: "rounded-se",
-						},
-						"ee": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-ee",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-ee",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-ee",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-ee",
-								},
-							},
-							ClassGroupId: "rounded-ee",
-						},
-						"es": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-es",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-es",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-es",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-es",
-								},
-							},
-							ClassGroupId: "rounded-es",
-						},
-						"tl": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-tl",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-tl",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-tl",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-tl",
-								},
-							},
-							ClassGroupId: "rounded-tl",
-						},
-						"tr": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-tr",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-tr",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-tr",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-tr",
-								},
-							},
-							ClassGroupId: "rounded-tr",
-						},
-						"br": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-br",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-br",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-br",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-br",
-								},
-							},
-							ClassGroupId: "rounded-br",
-						},
-						"bl": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "rounded-bl",
-								},
-								"full": ClassPart{
-									ClassGroupId: "rounded-bl",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "rounded-bl",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "rounded-bl",
-								},
-							},
-							ClassGroupId: "rounded-bl",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsTshirtSize,
-							ClassGroupId: "rounded",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "rounded",
-						},
-					},
-					ClassGroupId: "rounded",
-				},
-				"border": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "border-color-x",
-								},
-							},
-							ClassGroupId: "border-w-x",
-						},
-						"y": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "border-color-y",
-								},
-							},
-							ClassGroupId: "border-w-y",
-						},
-						"s": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-s",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-s",
-								},
-							},
-							ClassGroupId: "border-w-s",
-						},
-						"e": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-e",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-e",
-								},
-							},
-							ClassGroupId: "border-w-e",
-						},
-						"t": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-t",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-t",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "border-color-t",
-								},
-							},
-							ClassGroupId: "border-w-t",
-						},
-						"r": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-r",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-r",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "border-color-r",
-								},
-							},
-							ClassGroupId: "border-w-r",
-						},
-						"b": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-b",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-b",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "border-color-b",
-								},
-							},
-							ClassGroupId: "border-w-b",
-						},
-						"l": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-w-l",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-w-l",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "border-color-l",
-								},
-							},
-							ClassGroupId: "border-w-l",
-						},
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "border-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "border-opacity",
-								},
-							},
-							ClassGroupId: "border-opacity",
-						},
-						"solid": ClassPart{
-							ClassGroupId: "border-style",
-						},
-						"dashed": ClassPart{
-							ClassGroupId: "border-style",
-						},
-						"dotted": ClassPart{
-							ClassGroupId: "border-style",
-						},
-						"double": ClassPart{
-							ClassGroupId: "border-style",
-						},
-						"none": ClassPart{
-							ClassGroupId: "border-style",
-						},
-						"hidden": ClassPart{
-							ClassGroupId: "border-style",
-						},
-						"collapse": ClassPart{
-							ClassGroupId: "border-collapse",
-						},
-						"separate": ClassPart{
-							ClassGroupId: "border-collapse",
-						},
-						"spacing": ClassPart{
-							NextPart: map[string]ClassPart{
-								"x": ClassPart{
-									Validators: []ClassGroupValidator{
-										ClassGroupValidator{
-											Fn:           IsArbitraryValue,
-											ClassGroupId: "border-spacing-x",
-										},
-										ClassGroupValidator{
-											Fn:           IsLength,
-											ClassGroupId: "border-spacing-x",
-										},
-										ClassGroupValidator{
-											Fn:           IsArbitraryLength,
-											ClassGroupId: "border-spacing-x",
-										},
-									},
-								},
-								"y": ClassPart{
-									Validators: []ClassGroupValidator{
-										ClassGroupValidator{
-											Fn:           IsArbitraryValue,
-											ClassGroupId: "border-spacing-y",
-										},
-										ClassGroupValidator{
-											Fn:           IsLength,
-											ClassGroupId: "border-spacing-y",
-										},
-										ClassGroupValidator{
-											Fn:           IsArbitraryLength,
-											ClassGroupId: "border-spacing-y",
-										},
-									},
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "border-spacing",
-								},
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "border-spacing",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "border-spacing",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "border-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "border-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "border-color",
-						},
-					},
-					ClassGroupId: "border-w",
-				},
-				"divide": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									ClassGroupId: "divide-x-reverse",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "divide-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "divide-x",
-								},
-							},
-							ClassGroupId: "divide-x",
-						},
-						"y": ClassPart{
-							NextPart: map[string]ClassPart{
-								"reverse": ClassPart{
-									ClassGroupId: "divide-y-reverse",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "divide-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "divide-y",
-								},
-							},
-							ClassGroupId: "divide-y",
-						},
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "divide-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "divide-opacity",
-								},
-							},
-						},
-						"solid": ClassPart{
-							ClassGroupId: "divide-style",
-						},
-						"dashed": ClassPart{
-							ClassGroupId: "divide-style",
-						},
-						"dotted": ClassPart{
-							ClassGroupId: "divide-style",
-						},
-						"double": ClassPart{
-							ClassGroupId: "divide-style",
-						},
-						"none": ClassPart{
-							ClassGroupId: "divide-style",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "divide-color",
-						},
-					},
-				},
-				"outline": ClassPart{
-					NextPart: map[string]ClassPart{
-						"solid": ClassPart{
-							ClassGroupId: "outline-style",
-						},
-						"dashed": ClassPart{
-							ClassGroupId: "outline-style",
-						},
-						"dotted": ClassPart{
-							ClassGroupId: "outline-style",
-						},
-						"double": ClassPart{
-							ClassGroupId: "outline-style",
-						},
-						"none": ClassPart{
-							ClassGroupId: "outline-style",
-						},
-						"offset": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "outline-offset",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "outline-offset",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "outline-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "outline-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "outline-color",
-						},
-					},
-					ClassGroupId: "outline-style",
-				},
-				"ring": ClassPart{
-					NextPart: map[string]ClassPart{
-						"inset": ClassPart{
-							ClassGroupId: "ring-w-inset",
-						},
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "ring-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "ring-opacity",
-								},
-							},
-						},
-						"offset": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "ring-offset-w",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "ring-offset-w",
-								},
-								ClassGroupValidator{
-									Fn:           IsAny,
-									ClassGroupId: "ring-offset-color",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "ring-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "ring-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "ring-color",
-						},
-					},
-					ClassGroupId: "ring-w",
-				},
-
-				"shadow": ClassPart{
-					NextPart: map[string]ClassPart{
-						"inner": ClassPart{
-							ClassGroupId: "shadow",
-						},
-						"none": ClassPart{
-							ClassGroupId: "shadow",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsTshirtSize,
-							ClassGroupId: "shadow",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryShadow,
-							ClassGroupId: "shadow",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "shadow-color",
-						},
-					},
-					ClassGroupId: "shadow",
-				},
-				"opacity": ClassPart{
-					NextPart: map[string]ClassPart{},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "opacity",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "opacity",
-						},
-					},
-				},
-
-				"mix": ClassPart{
-					NextPart: map[string]ClassPart{
-						"blend": ClassPart{
-							NextPart: map[string]ClassPart{
-								"normal": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"multiply": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"screen": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"overlay": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"darken": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"lighten": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"color": ClassPart{
-									NextPart: map[string]ClassPart{
-										"dodge": ClassPart{
-											ClassGroupId: "mix-blend",
-										},
-										"burn": ClassPart{
-											ClassGroupId: "mix-blend",
-										},
-									},
-									ClassGroupId: "mix-blend",
-								},
-								"hard": ClassPart{
-									NextPart: map[string]ClassPart{
-										"light": ClassPart{
-											ClassGroupId: "mix-blend",
-										},
-									},
-								},
-								"soft": ClassPart{
-									NextPart: map[string]ClassPart{
-										"light": ClassPart{
-											ClassGroupId: "mix-blend",
-										},
-									},
-								},
-								"difference": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"exclusion": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"hue": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"saturation": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"luminosity": ClassPart{
-									ClassGroupId: "mix-blend",
-								},
-								"plus": ClassPart{
-									NextPart: map[string]ClassPart{
-										"lighter": ClassPart{
-											ClassGroupId: "mix-blend",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-				"filter": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "filter",
-						},
-					},
-					ClassGroupId: "filter",
-				},
-				"blur": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "blur",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsTshirtSize,
-							ClassGroupId: "blur",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "blur",
-						},
-					},
-					ClassGroupId: "blur",
-				},
-
-				"brightness": ClassPart{
-					NextPart: map[string]ClassPart{},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "brightness",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "brightness",
-						},
-					},
-					ClassGroupId: "brightness",
-				},
-
-				"contrast": ClassPart{
-					NextPart: map[string]ClassPart{},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "contrast",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "contrast",
-						},
-					},
-					ClassGroupId: "contrast",
-				},
-
-				"drop": ClassPart{
-					NextPart: map[string]ClassPart{
-						"shadow": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "drop-shadow",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "drop-shadow",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "drop-shadow",
-								},
-							},
-							ClassGroupId: "drop-shadow",
-						},
-					},
-				},
-
-				"grayscale": ClassPart{
-					NextPart: map[string]ClassPart{
-						"0": ClassPart{
-							ClassGroupId: "grayscale",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "grayscale",
-						},
-					},
-					ClassGroupId: "grayscale",
-				},
-
-				"hue": ClassPart{
-					NextPart: map[string]ClassPart{
-						"rotate": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "hue-rotate",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "hue-rotate",
-								},
-							},
-						},
-					},
-				},
-				"invert": ClassPart{
-					NextPart: map[string]ClassPart{
-						"0": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "invert",
-								},
-							},
-							ClassGroupId: "invert",
-						},
-					},
-					ClassGroupId: "invert",
-				},
-
-				"saturate": ClassPart{
-					NextPart: map[string]ClassPart{},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "saturate",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "saturate",
-						},
-					},
-					ClassGroupId: "saturate",
-				},
-
-				"sepia": ClassPart{
-					NextPart: map[string]ClassPart{
-						"0": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "sepia",
-								},
-							},
-							ClassGroupId: "sepia",
-						},
-					},
-					ClassGroupId: "sepia",
-				},
-
-				"backdrop": ClassPart{
-					NextPart: map[string]ClassPart{
-						"filter": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "backdrop-filter",
-								},
-							},
-							ClassGroupId: "backdrop-filter",
-						},
-						"blur": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "backdrop-blur",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsTshirtSize,
-									ClassGroupId: "backdrop-blur",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "backdrop-blur",
-								},
-							},
-							ClassGroupId: "backdrop-blur",
-						},
-						"brightness": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "backdrop-brightness",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "backdrop-brightness",
-								},
-							},
-							ClassGroupId: "backdrop-brightness",
-						},
-						"contrast": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "backdrop-contrast",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "backdrop-contrast",
-								},
-							},
-							ClassGroupId: "backdrop-contrast",
-						},
-						"grayscale": ClassPart{
-							NextPart: map[string]ClassPart{
-								"0": ClassPart{
-									ClassGroupId: "backdrop-grayscale",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "backdrop-grayscale",
-								},
-							},
-							ClassGroupId: "backdrop-grayscale",
-						},
-						"hue": ClassPart{
-							NextPart: map[string]ClassPart{
-								"rotate": ClassPart{
-									Validators: []ClassGroupValidator{
-										ClassGroupValidator{
-											Fn:           IsNumber,
-											ClassGroupId: "backdrop-hue-rotate",
-										},
-										ClassGroupValidator{
-											Fn:           IsArbitraryValue,
-											ClassGroupId: "backdrop-hue-rotate",
-										},
-									},
-								},
-							},
-							Validators: []ClassGroupValidator{},
-						},
-						"invert": ClassPart{
-							NextPart: map[string]ClassPart{
-								"0": ClassPart{
-									Validators: []ClassGroupValidator{
-										ClassGroupValidator{
-											Fn:           IsArbitraryValue,
-											ClassGroupId: "backdrop-invert",
-										},
-									},
-									ClassGroupId: "backdrop-invert",
-								},
-							},
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "backdrop-invert",
-						},
-						"opacity": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "backdrop-opacity",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "backdrop-opacity",
-								},
-							},
-							ClassGroupId: "backdrop-opacity",
-						},
-						"saturate": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "backdrop-saturate",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "backdrop-saturate",
-								},
-							},
-							ClassGroupId: "backdrop-saturate",
-						},
-						"sepia": ClassPart{
-							NextPart: map[string]ClassPart{
-								"0": ClassPart{
-									Validators: []ClassGroupValidator{
-										ClassGroupValidator{
-											Fn:           IsArbitraryValue,
-											ClassGroupId: "backdrop-sepia",
-										},
-									},
-									ClassGroupId: "backdrop-sepia",
-								},
-							},
-							ClassGroupId: "backdrop-sepia",
-						},
-					},
-				},
-				"caption": ClassPart{
-					NextPart: map[string]ClassPart{
-						"top": ClassPart{
-							ClassGroupId: "caption",
-						},
-						"bottom": ClassPart{
-							ClassGroupId: "caption",
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-				"transition": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "transition",
-						},
-						"all": ClassPart{
-							ClassGroupId: "transition",
-						},
-						"colors": ClassPart{
-							ClassGroupId: "transition",
-						},
-						"opacity": ClassPart{
-							ClassGroupId: "transition",
-						},
-						"shadow": ClassPart{
-							ClassGroupId: "transition",
-						},
-						"transform": ClassPart{
-							ClassGroupId: "transition",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "transition",
-						},
-					},
-					ClassGroupId: "transition",
-				},
-				"duration": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "duration",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "duration",
-						},
-					},
-				},
-				"ease": ClassPart{
-					NextPart: map[string]ClassPart{
-						"linear": ClassPart{
-							ClassGroupId: "ease",
-						},
-						"in": ClassPart{
-							NextPart: map[string]ClassPart{
-								"out": ClassPart{
-									ClassGroupId: "ease",
-								},
-							},
-							ClassGroupId: "ease",
-						},
-						"out": ClassPart{
-							ClassGroupId: "ease",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "ease",
-						},
-					},
-				},
-				"delay": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "delay",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "delay",
-						},
-					},
-				},
-				"animate": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "animate",
-						},
-						"spin": ClassPart{
-							ClassGroupId: "animate",
-						},
-						"ping": ClassPart{
-							ClassGroupId: "animate",
-						},
-						"pulse": ClassPart{
-							ClassGroupId: "animate",
-						},
-						"bounce": ClassPart{
-							ClassGroupId: "animate",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "animate",
-						},
-					},
-				},
-				"transform": ClassPart{
-					NextPart: map[string]ClassPart{
-						"gpu": ClassPart{
-							ClassGroupId: "transform",
-						},
-						"none": ClassPart{
-							ClassGroupId: "transform",
-						},
-					},
-					ClassGroupId: "transform",
-				},
-				"scale": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "scale-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "scale-x",
-								},
-							},
-						},
-						"y": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "scale-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryNumber,
-									ClassGroupId: "scale-y",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsNumber,
-							ClassGroupId: "scale",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "scale",
-						},
-					},
-				},
-				"rotate": ClassPart{
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsInteger,
-							ClassGroupId: "rotate",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "rotate",
-						},
-					},
-				},
-				"translate": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "translate-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "translate-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "translate-x",
-								},
-							},
-						},
-						"y": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "translate-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsLength,
-									ClassGroupId: "translate-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "translate-y",
-								},
-							},
-						},
-					},
-				},
-				"skew": ClassPart{
-					NextPart: map[string]ClassPart{
-						"x": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "skew-x",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "skew-x",
-								},
-							},
-						},
-						"y": ClassPart{
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsNumber,
-									ClassGroupId: "skew-y",
-								},
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "skew-y",
-								},
-							},
-						},
-					},
-				},
-				"origin": ClassPart{
-					NextPart: map[string]ClassPart{
-						"center": ClassPart{
-							ClassGroupId: "transform-origin",
-						},
-						"top": ClassPart{
-							NextPart: map[string]ClassPart{
-								"right": ClassPart{
-									ClassGroupId: "transform-origin",
-								},
-								"left": ClassPart{
-									ClassGroupId: "transform-origin",
-								},
-							},
-							ClassGroupId: "transform-origin",
-						},
-						"right": ClassPart{
-							ClassGroupId: "transform-origin",
-						},
-						"bottom": ClassPart{
-							NextPart: map[string]ClassPart{
-								"right": ClassPart{
-									ClassGroupId: "transform-origin",
-								},
-								"left": ClassPart{
-									ClassGroupId: "transform-origin",
-								},
-							},
-							ClassGroupId: "transform-origin",
-						},
-						"left": ClassPart{
-							ClassGroupId: "transform-origin",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "transform-origin",
-						},
-					},
-				},
-				"accent": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							NextPart:     map[string]ClassPart{},
-							Validators:   []ClassGroupValidator{},
-							ClassGroupId: "accent",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "accent",
-						},
-					},
-				},
-				"appearance": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "appearance",
-						},
-						"auto": ClassPart{
-							ClassGroupId: "appearance",
-						},
-					},
-				},
-				"cursor": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"default": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"pointer": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"wait": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"text": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"move": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"help": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"not": ClassPart{
-							NextPart: map[string]ClassPart{
-								"allowed": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"none": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"context": ClassPart{
-							NextPart: map[string]ClassPart{
-								"menu": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"progress": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"cell": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"crosshair": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"vertical": ClassPart{
-							NextPart: map[string]ClassPart{
-								"text": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"alias": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"copy": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"no": ClassPart{
-							NextPart: map[string]ClassPart{
-								"drop": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"grab": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"grabbing": ClassPart{
-							ClassGroupId: "cursor",
-						},
-						"all": ClassPart{
-							NextPart: map[string]ClassPart{
-								"scroll": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"col": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"row": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"n": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"e": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"s": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"w": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"ne": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"nw": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"se": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"sw": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"ew": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"ns": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"nesw": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"nwse": ClassPart{
-							NextPart: map[string]ClassPart{
-								"resize": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-						"zoom": ClassPart{
-							NextPart: map[string]ClassPart{
-								"in": ClassPart{
-									ClassGroupId: "cursor",
-								},
-								"out": ClassPart{
-									ClassGroupId: "cursor",
-								},
-							},
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsArbitraryValue,
-							ClassGroupId: "cursor",
-						},
-					},
-				},
-				"caret": ClassPart{
-					NextPart: map[string]ClassPart{},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "caret-color",
-						},
-					},
-				},
-				"pointer": ClassPart{
-					NextPart: map[string]ClassPart{
-						"events": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "pointer-events",
-								},
-								"auto": ClassPart{
-									ClassGroupId: "pointer-events",
-								},
-							},
-						},
-					},
-				},
-				"resize": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "resize",
-						},
-						"y": ClassPart{
-							ClassGroupId: "resize",
-						},
-						"x": ClassPart{
-							ClassGroupId: "resize",
-						},
-					},
-					ClassGroupId: "resize",
-				},
-				"scroll": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "scroll-behavior",
-						},
-						"smooth": ClassPart{
-							ClassGroupId: "scroll-behavior",
-						},
-						"m": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-m",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-m",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-m",
-								},
-							},
-						},
-						"mx": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-mx",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-mx",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-mx",
-								},
-							},
-						},
-						"my": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-my",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-my",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-my",
-								},
-							},
-						},
-						"ms": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-ms",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-ms",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-ms",
-								},
-							},
-						},
-						"me": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-me",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-me",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-me",
-								},
-							},
-						},
-						"mt": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-mt",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-mt",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-mt",
-								},
-							},
-						},
-						"mr": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-mr",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-mr",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-mr",
-								},
-							},
-						},
-						"mb": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-mb",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-mb",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-mb",
-								},
-							},
-						},
-						"ml": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-ml",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-ml",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-ml",
-								},
-							},
-						},
-						"p": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-p",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-p",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-p",
-								},
-							},
-						},
-						"px": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-px",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-px",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-px",
-								},
-							},
-						},
-						"py": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-py",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-py",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-py",
-								},
-							},
-						},
-						"ps": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-ps",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-ps",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-ps",
-								},
-							},
-						},
-						"pe": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-pe",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-pe",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-pe",
-								},
-							},
-						},
-						"pt": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-pt",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-pt",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-pt",
-								},
-							},
-						},
-						"pr": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-pr",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-pr",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-pr",
-								},
-							},
-						},
-						"pb": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-pb",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-pb",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-pb",
-								},
-							},
-						},
-						"pl": ClassPart{
-							Validators: []ClassGroupValidator{
-								{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "scroll-pl",
-								},
-								{
-									Fn:           IsLength,
-									ClassGroupId: "scroll-pl",
-								},
-								{
-									Fn:           IsArbitraryLength,
-									ClassGroupId: "scroll-pl",
-								},
-							},
-						},
-					},
-				},
-				"snap": ClassPart{
-					NextPart: map[string]ClassPart{
-						"start": ClassPart{
-							ClassGroupId: "snap-align",
-						},
-						"end": ClassPart{
-							ClassGroupId: "snap-align",
-						},
-						"center": ClassPart{
-							ClassGroupId: "snap-align",
-						},
-						"align": ClassPart{
-							NextPart: map[string]ClassPart{
-								"none": ClassPart{
-									ClassGroupId: "snap-align",
-								},
-							},
-						},
-						"normal": ClassPart{
-							ClassGroupId: "snap-stop",
-						},
-						"always": ClassPart{
-							ClassGroupId: "snap-stop",
-						},
-						"none": ClassPart{
-							ClassGroupId: "snap-type",
-						},
-						"x": ClassPart{
-							ClassGroupId: "snap-type",
-						},
-						"y": ClassPart{
-							ClassGroupId: "snap-type",
-						},
-						"both": ClassPart{
-							ClassGroupId: "snap-type",
-						},
-						"mandatory": ClassPart{
-							ClassGroupId: "snap-strictness",
-						},
-						"proximity": ClassPart{
-							ClassGroupId: "snap-strictness",
-						},
-					},
-				},
-				"touch": ClassPart{
-					NextPart: map[string]ClassPart{
-						"auto": ClassPart{
-							ClassGroupId: "touch",
-						},
-						"none": ClassPart{
-							ClassGroupId: "touch",
-						},
-						"manipulation": ClassPart{
-							ClassGroupId: "touch",
-						},
-						"pan": ClassPart{
-							NextPart: map[string]ClassPart{
-								"x": ClassPart{
-									ClassGroupId: "touch-x",
-								},
-								"left": ClassPart{
-									ClassGroupId: "touch-x",
-								},
-								"right": ClassPart{
-									ClassGroupId: "touch-x",
-								},
-								"y": ClassPart{
-									ClassGroupId: "touch-y",
-								},
-								"up": ClassPart{
-									ClassGroupId: "touch-y",
-								},
-								"down": ClassPart{
-									ClassGroupId: "touch-y",
-								},
-							},
-						},
-						"pinch": ClassPart{
-							NextPart: map[string]ClassPart{
-								"zoom": ClassPart{
-									ClassGroupId: "touch-pz",
-								},
-							},
-						},
-					},
-				},
-				"select": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "select",
-						},
-						"text": ClassPart{
-							ClassGroupId: "select",
-						},
-						"all": ClassPart{
-							ClassGroupId: "select",
-						},
-						"auto": ClassPart{
-							ClassGroupId: "select",
-						},
-					},
-					Validators: []ClassGroupValidator{},
-				},
-				"will": ClassPart{
-					NextPart: map[string]ClassPart{
-						"change": ClassPart{
-							NextPart: map[string]ClassPart{
-								"auto": ClassPart{
-									ClassGroupId: "will-change",
-								},
-								"scroll": ClassPart{
-									ClassGroupId: "will-change",
-								},
-								"contents": ClassPart{
-									ClassGroupId: "will-change",
-								},
-								"transform": ClassPart{
-									ClassGroupId: "will-change",
-								},
-							},
-							Validators: []ClassGroupValidator{
-								ClassGroupValidator{
-									Fn:           IsArbitraryValue,
-									ClassGroupId: "will-change",
-								},
-							},
-						},
-					},
-				},
-				"fill": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "fill",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "fill",
-						},
-					},
-				},
-				"stroke": ClassPart{
-					NextPart: map[string]ClassPart{
-						"none": ClassPart{
-							ClassGroupId: "stroke",
-						},
-					},
-					Validators: []ClassGroupValidator{
-						ClassGroupValidator{
-							Fn:           IsLength,
-							ClassGroupId: "stroke-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryLength,
-							ClassGroupId: "stroke-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsArbitraryNumber,
-							ClassGroupId: "stroke-w",
-						},
-						ClassGroupValidator{
-							Fn:           IsAny,
-							ClassGroupId: "stroke",
-						},
-					},
-				},
-				"sr": ClassPart{
-					NextPart: map[string]ClassPart{
-						"only": ClassPart{
-							ClassGroupId: "sr",
-						},
-					},
-				},
-				"forced": ClassPart{
-					NextPart: map[string]ClassPart{
-						"color": ClassPart{
-							NextPart: map[string]ClassPart{
-								"adjust": ClassPart{
-									NextPart: map[string]ClassPart{
-										"auto": ClassPart{
-											ClassGroupId: "forced-color-adjust",
-										},
-										"none": ClassPart{
-											ClassGroupId: "forced-color-adjust",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
+			"rounded": {
+				"rounded-s",
+				"rounded-e",
+				"rounded-t",
+				"rounded-r",
+				"rounded-b",
+				"rounded-l",
+				"rounded-ss",
+				"rounded-se",
+				"rounded-ee",
+				"rounded-es",
+				"rounded-tl",
+				"rounded-tr",
+				"rounded-br",
+				"rounded-bl",
 			},
+			"rounded-s":      {"rounded-ss", "rounded-es"},
+			"rounded-e":      {"rounded-se", "rounded-ee"},
+			"rounded-t":      {"rounded-tl", "rounded-tr"},
+			"rounded-r":      {"rounded-tr", "rounded-br"},
+			"rounded-b":      {"rounded-br", "rounded-bl"},
+			"rounded-l":      {"rounded-tl", "rounded-bl"},
+			"border-spacing": {"border-spacing-x", "border-spacing-y"},
+			"border-w": {
+				"border-w-x",
+				"border-w-y",
+				"border-w-s",
+				"border-w-e",
+				"border-w-bs",
+				"border-w-be",
+				"border-w-t",
+				"border-w-r",
+				"border-w-b",
+				"border-w-l",
+			},
+			"border-w-x": {"border-w-r", "border-w-l"},
+			"border-w-y": {"border-w-t", "border-w-b"},
+			"border-color": {
+				"border-color-x",
+				"border-color-y",
+				"border-color-s",
+				"border-color-e",
+				"border-color-bs",
+				"border-color-be",
+				"border-color-t",
+				"border-color-r",
+				"border-color-b",
+				"border-color-l",
+			},
+			"border-color-x": {"border-color-r", "border-color-l"},
+			"border-color-y": {"border-color-t", "border-color-b"},
+			"translate":      {"translate-x", "translate-y", "translate-none"},
+			"translate-none": {"translate", "translate-x", "translate-y", "translate-z"},
+			"scroll-m": {
+				"scroll-mx",
+				"scroll-my",
+				"scroll-ms",
+				"scroll-me",
+				"scroll-mbs",
+				"scroll-mbe",
+				"scroll-mt",
+				"scroll-mr",
+				"scroll-mb",
+				"scroll-ml",
+			},
+			"scroll-mx": {"scroll-mr", "scroll-ml"},
+			"scroll-my": {"scroll-mt", "scroll-mb"},
+			"scroll-p": {
+				"scroll-px",
+				"scroll-py",
+				"scroll-ps",
+				"scroll-pe",
+				"scroll-pbs",
+				"scroll-pbe",
+				"scroll-pt",
+				"scroll-pr",
+				"scroll-pb",
+				"scroll-pl",
+			},
+			"scroll-px": {"scroll-pr", "scroll-pl"},
+			"scroll-py": {"scroll-pt", "scroll-pb"},
+			"touch":     {"touch-x", "touch-y", "touch-pz"},
+			"touch-x":   {"touch"},
+			"touch-y":   {"touch"},
+			"touch-pz":  {"touch"},
+		},
+		ConflictingClassGroupModifiers: ConflictingClassGroupsMap{
+			"font-size": {"leading"},
+		},
+		// ClassGroupOrder lists ClassGroups keys in JS source order so that
+		// shared trie-node validators resolve consistently. See
+		// Config.ClassGroupOrder for the rationale.
+		ClassGroupOrder: []string{
+			"aspect", "container", "container-type", "container-named", "columns",
+			"break-after", "break-before", "break-inside", "box-decoration", "box",
+			"display", "sr", "float", "clear", "isolation", "object-fit", "object-position",
+			"overflow", "overflow-x", "overflow-y", "overscroll", "overscroll-x", "overscroll-y",
+			"position", "inset", "inset-x", "inset-y", "start", "end", "inset-bs", "inset-be",
+			"top", "right", "bottom", "left", "visibility", "z",
+			"basis", "flex-direction", "flex-wrap", "flex", "grow", "shrink", "order",
+			"grid-cols", "col-start-end", "col-start", "col-end",
+			"grid-rows", "row-start-end", "row-start", "row-end",
+			"grid-flow", "auto-cols", "auto-rows",
+			"gap", "gap-x", "gap-y",
+			"justify-content", "justify-items", "justify-self",
+			"align-content", "align-items", "align-self",
+			"place-content", "place-items", "place-self",
+			"p", "px", "py", "ps", "pe", "pbs", "pbe", "pt", "pr", "pb", "pl",
+			"m", "mx", "my", "ms", "me", "mbs", "mbe", "mt", "mr", "mb", "ml",
+			"space-x", "space-x-reverse", "space-y", "space-y-reverse",
+			"size", "inline-size", "min-inline-size", "max-inline-size",
+			"block-size", "min-block-size", "max-block-size",
+			"w", "min-w", "max-w", "h", "min-h", "max-h",
+			"font-size", "font-smoothing", "font-style", "font-weight", "font-stretch",
+			"font-family", "font-features",
+			"fvn-normal", "fvn-ordinal", "fvn-slashed-zero", "fvn-figure", "fvn-spacing", "fvn-fraction",
+			"tracking", "line-clamp", "leading",
+			"list-image", "list-style-position", "list-style-type",
+			"text-alignment", "placeholder-color", "text-color",
+			"text-decoration", "text-decoration-style", "text-decoration-thickness", "text-decoration-color",
+			"underline-offset", "text-transform", "text-overflow", "text-wrap",
+			"indent", "tab-size", "vertical-align", "whitespace", "break", "wrap", "hyphens", "content",
+			"bg-attachment", "bg-clip", "bg-origin", "bg-position", "bg-repeat", "bg-size", "bg-image", "bg-color",
+			"gradient-from-pos", "gradient-via-pos", "gradient-to-pos",
+			"gradient-from", "gradient-via", "gradient-to",
+			"rounded", "rounded-s", "rounded-e", "rounded-t", "rounded-r", "rounded-b", "rounded-l",
+			"rounded-ss", "rounded-se", "rounded-ee", "rounded-es",
+			"rounded-tl", "rounded-tr", "rounded-br", "rounded-bl",
+			"border-w", "border-w-x", "border-w-y", "border-w-s", "border-w-e",
+			"border-w-bs", "border-w-be", "border-w-t", "border-w-r", "border-w-b", "border-w-l",
+			"divide-x", "divide-x-reverse", "divide-y", "divide-y-reverse",
+			"border-style", "divide-style",
+			"border-color", "border-color-x", "border-color-y",
+			"border-color-s", "border-color-e", "border-color-bs", "border-color-be",
+			"border-color-t", "border-color-r", "border-color-b", "border-color-l", "divide-color",
+			"outline-style", "outline-offset", "outline-w", "outline-color",
+			"shadow", "shadow-color", "inset-shadow", "inset-shadow-color",
+			"ring-w", "ring-w-inset", "ring-color", "ring-offset-w", "ring-offset-color",
+			"inset-ring-w", "inset-ring-color", "text-shadow", "text-shadow-color",
+			"opacity", "mix-blend", "bg-blend",
+			"mask-clip", "mask-composite",
+			"mask-image-linear-pos", "mask-image-linear-from-pos", "mask-image-linear-to-pos",
+			"mask-image-linear-from-color", "mask-image-linear-to-color",
+			"mask-image-t-from-pos", "mask-image-t-to-pos", "mask-image-t-from-color", "mask-image-t-to-color",
+			"mask-image-r-from-pos", "mask-image-r-to-pos", "mask-image-r-from-color", "mask-image-r-to-color",
+			"mask-image-b-from-pos", "mask-image-b-to-pos", "mask-image-b-from-color", "mask-image-b-to-color",
+			"mask-image-l-from-pos", "mask-image-l-to-pos", "mask-image-l-from-color", "mask-image-l-to-color",
+			"mask-image-x-from-pos", "mask-image-x-to-pos", "mask-image-x-from-color", "mask-image-x-to-color",
+			"mask-image-y-from-pos", "mask-image-y-to-pos", "mask-image-y-from-color", "mask-image-y-to-color",
+			"mask-image-radial", "mask-image-radial-from-pos", "mask-image-radial-to-pos",
+			"mask-image-radial-from-color", "mask-image-radial-to-color",
+			"mask-image-radial-shape", "mask-image-radial-size", "mask-image-radial-pos",
+			"mask-image-conic-pos", "mask-image-conic-from-pos", "mask-image-conic-to-pos",
+			"mask-image-conic-from-color", "mask-image-conic-to-color",
+			"mask-mode", "mask-origin", "mask-position", "mask-repeat", "mask-size", "mask-type", "mask-image",
+			"filter", "blur", "brightness", "contrast",
+			"drop-shadow", "drop-shadow-color",
+			"grayscale", "hue-rotate", "invert", "saturate", "sepia",
+			"backdrop-filter", "backdrop-blur", "backdrop-brightness", "backdrop-contrast",
+			"backdrop-grayscale", "backdrop-hue-rotate", "backdrop-invert",
+			"backdrop-opacity", "backdrop-saturate", "backdrop-sepia",
+			"border-collapse", "border-spacing", "border-spacing-x", "border-spacing-y",
+			"table-layout", "caption",
+			"transition", "transition-behavior", "duration", "ease", "delay",
+			"animate", "backface", "perspective", "perspective-origin",
+			"rotate", "rotate-x", "rotate-y", "rotate-z",
+			"scale", "scale-x", "scale-y", "scale-z", "scale-3d",
+			"skew", "skew-x", "skew-y",
+			"transform", "transform-origin", "transform-style",
+			"translate", "translate-x", "translate-y", "translate-z", "translate-none",
+			"zoom",
+			"accent", "appearance", "caret-color", "color-scheme", "cursor",
+			"field-sizing", "pointer-events", "resize", "scroll-behavior",
+			"scrollbar-thumb-color", "scrollbar-track-color", "scrollbar-gutter", "scrollbar-w",
+			"scroll-m", "scroll-mx", "scroll-my", "scroll-ms", "scroll-me",
+			"scroll-mbs", "scroll-mbe", "scroll-mt", "scroll-mr", "scroll-mb", "scroll-ml",
+			"scroll-p", "scroll-px", "scroll-py", "scroll-ps", "scroll-pe",
+			"scroll-pbs", "scroll-pbe", "scroll-pt", "scroll-pr", "scroll-pb", "scroll-pl",
+			"snap-align", "snap-stop", "snap-type", "snap-strictness",
+			"touch", "touch-x", "touch-y", "touch-pz",
+			"select", "will-change",
+			"fill", "stroke-w", "stroke",
+			"forced-color-adjust",
+		},
+		PostfixLookupClassGroups: []string{"container-type"},
+		OrderSensitiveModifiers: []string{
+			"*",
+			"**",
+			"after",
+			"backdrop",
+			"before",
+			"details-content",
+			"file",
+			"first-letter",
+			"first-line",
+			"marker",
+			"placeholder",
+			"selection",
 		},
 	}
 }
