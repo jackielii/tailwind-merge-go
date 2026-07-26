@@ -15,51 +15,51 @@ type node struct {
 
 type LRU struct {
 	maxCapacity int
-	capacity    int
+	size        int
 	cache       map[string]*node
 	head        *node
 	tail        *node
-	cacheMutex  sync.RWMutex
-	listMutex   sync.Mutex
+	mu          sync.Mutex
 }
 
 func (lru *LRU) Get(key string) string {
-	lru.cacheMutex.RLock()
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+
 	n := lru.cache[key]
 	if n == nil {
-		lru.cacheMutex.RUnlock()
 		return ""
 	}
-	lru.cacheMutex.RUnlock()
 
-	lru.listMutex.Lock()
-	lru.remove(n)
-	lru.insertRight(n)
-	lru.listMutex.Unlock()
-
+	lru.moveToMostRecentlyUsed(n)
 	return n.val
 }
 
 func (lru *LRU) Set(key, value string) {
-	lru.cacheMutex.Lock()
-	if n := lru.cache[key]; n != nil {
-		lru.remove(n)
+	lru.mu.Lock()
+	defer lru.mu.Unlock()
+
+	if lru.maxCapacity <= 0 {
+		return
 	}
+
+	if n := lru.cache[key]; n != nil {
+		n.val = value
+		lru.moveToMostRecentlyUsed(n)
+		return
+	}
+
 	n := &node{key: key, val: value}
 	lru.cache[key] = n
-	lru.cacheMutex.Unlock()
-	lru.listMutex.Lock()
 	lru.insertRight(n)
-	lru.listMutex.Unlock()
-	// evict
+	lru.size++
 
-	lru.listMutex.Lock()
-	if lru.capacity > lru.maxCapacity {
-		delete(lru.cache, lru.tail.next.key)
-		lru.remove(lru.tail.next)
+	if lru.size > lru.maxCapacity {
+		evicted := lru.tail.next
+		lru.remove(evicted)
+		delete(lru.cache, evicted.key)
+		lru.size--
 	}
-	lru.listMutex.Unlock()
-
 }
 
 func (lru *LRU) insertRight(n *node) {
@@ -70,6 +70,11 @@ func (lru *LRU) insertRight(n *node) {
 	lru.head.prev = n
 }
 
+func (lru *LRU) moveToMostRecentlyUsed(n *node) {
+	lru.remove(n)
+	lru.insertRight(n)
+}
+
 func (lru *LRU) remove(n *node) {
 	prev := n.prev
 	nxt := n.next
@@ -77,7 +82,6 @@ func (lru *LRU) remove(n *node) {
 	nxt.prev = prev
 	n.prev = nil
 	n.next = nil
-	lru.capacity--
 }
 
 func Make(maxCapacity int) cache.ICache {
@@ -87,7 +91,7 @@ func Make(maxCapacity int) cache.ICache {
 	head.prev = tail
 	return &LRU{
 		maxCapacity: maxCapacity,
-		capacity:    0,
+		size:        0,
 		cache:       make(map[string]*node),
 		head:        head,
 		tail:        tail,
